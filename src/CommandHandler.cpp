@@ -1,6 +1,10 @@
 #include "CommandHandler.h"
 #include "Config.h"
 
+// 静态变量定义
+bool CommandHandler::realtimeDataEnabled = false;
+uint32_t CommandHandler::lastRealtimeDataTime = 0;
+
 // 命令定义表
 const CommandHandler::Command CommandHandler::commands[] = {
     {"help", "显示帮助信息", &CommandHandler::showHelp},
@@ -18,7 +22,8 @@ const CommandHandler::Command CommandHandler::commands[] = {
     {"buffer", "显示缓冲区状态", &CommandHandler::showBufferStatus},
     {"sensors", "显示传感器类型", &CommandHandler::showSensorTypes},
     {"config", "显示配置信息", &CommandHandler::showNetworkConfig},
-    {"dropped", "切换显示丢弃数据包", &CommandHandler::toggleDroppedPackets}
+    {"dropped", "切换显示丢弃数据包", &CommandHandler::toggleDroppedPackets},
+    {"realtime", "实时显示传感器数据", &CommandHandler::showRealtimeData}
 };
 
 CommandHandler::CommandHandler() {
@@ -444,3 +449,43 @@ void CommandHandler::toggleDroppedPackets(const String& args) {
         Serial.printf("现在不会显示丢弃数据包的详细信息\n");
     }
 }
+
+void CommandHandler::showRealtimeData(const String& args) {
+    realtimeDataEnabled = !realtimeDataEnabled;
+    Serial.printf("[CommandHandler] 实时数据显示: %s\n", 
+                  realtimeDataEnabled ? "开启" : "关闭");
+    
+    if (realtimeDataEnabled) {
+        Serial.printf("现在会实时显示解析出的传感器数据\n");
+        Serial.printf("按 Ctrl+C 或再次输入 'realtime' 停止显示\n");
+        lastRealtimeDataTime = millis();
+    } else {
+        Serial.printf("已停止实时数据显示\n");
+    }
+}
+
+bool CommandHandler::isRealtimeDataEnabled() {
+    return realtimeDataEnabled;
+}
+
+void CommandHandler::displayRealtimeSensorData(const SensorFrame& frame) {
+    if (!realtimeDataEnabled) {
+        return;
+    }
+    
+    // 限制显示频率，避免刷屏
+    uint32_t now = millis();
+    if (now - lastRealtimeDataTime < 100) { // 100ms间隔
+        return;
+    }
+    lastRealtimeDataTime = now;
+    
+    // 显示传感器数据
+    const char* sensorType = SensorData::getSensorType(frame.sensorId);
+    Serial.printf("[实时数据] %s(ID%d) - 时间戳:%u, 加速度:[%.2f,%.2f,%.2f], 角速度:[%.2f,%.2f,%.2f], 角度:[%.2f,%.2f,%.2f]\n",
+                  sensorType, frame.sensorId, frame.timestamp,
+                  frame.acc[0], frame.acc[1], frame.acc[2],
+                  frame.gyro[0], frame.gyro[1], frame.gyro[2],
+                  frame.angle[0], frame.angle[1], frame.angle[2]);
+}
+

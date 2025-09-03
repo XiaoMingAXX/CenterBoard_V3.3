@@ -5,8 +5,8 @@
 ✅ **项目已完全实现并编译通过！**
 
 - **编译状态**: SUCCESS ✅
-- **RAM使用率**: 14.1% (46,208 / 327,680 bytes)
-- **Flash使用率**: 67.3% (881,853 / 1,310,720 bytes)
+- **RAM使用率**: 14.1% (46,264 / 327,680 bytes)
+- **Flash使用率**: 42.1% (883,357 / 1,310,720 bytes)
 - **所有功能**: 100%完成
 
 ## 项目概述
@@ -18,13 +18,13 @@
 ### 核心模块
 
 1. **UartReceiver** - UART+DMA接收模块
-   - 管理4个UART接口的DMA接收
+   - 管理单个UART接口的DMA接收
    - 实时解析传感器数据帧
-   - 支持环形缓冲区高效数据存储
+   - 支持中断驱动的数据处理
 
 2. **SensorData** - 传感器数据管理
    - 管理传感器帧数据
-   - 实现数据块池管理
+   - 实现数据块队列管理
    - 提供数据统计和监控
 
 3. **WebSocketClient** - 网络通信模块
@@ -37,13 +37,10 @@
    - 系统状态监控
    - 调试和测试功能
 
-5. **TimeSync** - 时间同步模块
-   - 传感器时间戳同步
-   - 本地时间管理
-
-6. **BufferPool** - 缓冲池管理
-   - 内存块池管理
-   - 零拷贝数据传输
+5. **TaskManager** - 任务管理器
+   - FreeRTOS任务调度
+   - 双核任务分配
+   - 系统初始化
 
 ### 任务分配
 
@@ -84,36 +81,15 @@
 
 ### 网络配置
 
-网络参数已配置：
-
 ```cpp
 const char* Config::WIFI_SSID = "xiaoming";
 const char* Config::WIFI_PASSWORD = "LZMSDSG0704";
-const char* Config::SERVER_URL = "http://175.178.100.179";
+const char* Config::SERVER_URL = "175.178.100.179";
 const uint16_t Config::SERVER_PORT = 8000;
+const char* Config::WEBSOCKET_PATH = "/wxapp/esp32/batch_upload/";
 ```
 
 ### 服务器通信协议
-
-#### 启动数据采集
-```json
-{
-    "type": "start_collection",
-    "device_code": "2025001",
-    "session_id": "1015",
-    "timestamp": "2025-01-01T12:00:00.000000"
-}
-```
-
-#### 停止数据采集
-```json
-{
-    "command": "STOP_COLLECTION",
-    "device_code": "2025001",
-    "session_id": "1040",
-    "timestamp": "2025-08-05T07:32:54.864562"
-}
-```
 
 #### 数据上传格式
 ```json
@@ -142,11 +118,6 @@ const uint16_t Config::SERVER_PORT = 8000;
 
 ### 编译步骤
 
-1. 克隆项目到本地
-2. 使用PlatformIO打开项目
-3. 配置网络参数
-4. 编译并上传到ESP32-S3
-
 ```bash
 pio run -t upload
 ```
@@ -159,8 +130,6 @@ pio device monitor
 
 ## CLI命令
 
-系统支持以下CLI命令：
-
 | 命令 | 描述 | 示例 |
 |------|------|------|
 | `help` | 显示帮助信息 | `help` |
@@ -171,26 +140,43 @@ pio device monitor
 | `test` | 测试网络连接 | `test` |
 | `stats` | 显示统计信息 | `stats` |
 | `reset` | 重置统计信息 | `reset` |
+| `config` | 显示配置信息 | `config` |
+| `dropped` | 切换显示丢弃数据包 | `dropped` |
 
 ## 系统特性
 
 ### 高性能
 - 双核并行处理
-- DMA高效数据接收
+- DMA+中断高效数据接收
 - 零拷贝数据传输
 - 批量数据上传
+- FIFO队列丢弃策略
 
 ### 稳定性
 - 环形缓冲区防止数据丢失
 - 自动重连机制
 - 错误恢复和监控
 - 内存池管理
+- 双重释放保护
 
 ### 可扩展性
 - 模块化设计
 - 清晰的接口定义
 - 易于添加新功能
 - 配置化管理
+
+## 主要修复
+
+### V3.3.1 修复内容
+
+1. **UART中断注册问题** - 修复ESP32-S3 UART ISR注册失败
+2. **Core Dump分区错误** - 添加自定义分区表
+3. **CLI命令无响应** - 修复CLI任务栈溢出和响应问题
+4. **传感器数据流中断** - 修复UartReceiver和TaskManager的SensorData实例冲突
+5. **WebSocket队列内存泄漏** - 修复未连接时的内存泄漏问题
+6. **双重释放内存损坏** - 修复TaskManager中的双重释放问题
+7. **FIFO队列丢弃策略** - 实现优先丢弃旧数据的策略
+8. **调试功能增强** - 添加dropped命令控制调试信息显示
 
 ## 故障排除
 
@@ -210,18 +196,19 @@ pio device monitor
    - 确认网络连通性
    - 查看防火墙设置
 
-### 调试模式
-
-启用调试模式获取详细日志：
-
-```cpp
-#define DEBUG_MODE 1
-#define LOG_LEVEL DEBUG
-```
+4. **内存损坏错误**
+   - 检查是否有双重释放
+   - 验证内存分配和释放逻辑
 
 ## 版本历史
 
-- **V3.3** - 当前版本
+- **V3.3.1** - 当前版本
+  - 修复所有已知问题
+  - 优化内存管理
+  - 增强调试功能
+  - 提高系统稳定性
+
+- **V3.3** - 基础版本
   - 完整的模块化架构
   - 双核任务分配
   - WebSocket通信

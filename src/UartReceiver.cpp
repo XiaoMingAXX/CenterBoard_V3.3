@@ -1,6 +1,7 @@
 #include "UartReceiver.h"
 #include "driver/uart.h"
 #include "esp_intr_alloc.h"
+#include "CommandHandler.h"
 
 UartReceiver::UartReceiver() {
     sensorData = nullptr;
@@ -125,6 +126,10 @@ bool UartReceiver::parseFrame(const uint8_t* frameData) {
         if (frame.sensorId >= 1 && frame.sensorId <= 4) {
             stats.sensorFrameCounts[frame.sensorId - 1]++;
         }
+        
+        // 显示实时数据（如果启用）
+        CommandHandler::displayRealtimeSensorData(frame);
+        
         return true;
     }
     

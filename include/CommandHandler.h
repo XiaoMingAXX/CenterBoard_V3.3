@@ -57,10 +57,23 @@ public:
     // 显示缓冲区状态
     void showBufferStatus(const String& args = "");
     
+    // 实时显示传感器数据
+    void showRealtimeData(const String& args = "");
+    
+    // 检查是否启用实时显示
+    static bool isRealtimeDataEnabled();
+    
+    // 显示实时传感器数据（由UartReceiver调用）
+    static void displayRealtimeSensorData(const SensorFrame& frame);
+    
 private:
     UartReceiver* uartReceiver;
     WebSocketClient* webSocketClient;
     SensorData* sensorData;
+    
+    // 实时数据显示控制
+    static bool realtimeDataEnabled;
+    static uint32_t lastRealtimeDataTime;
     
     // 命令解析相关
     struct Command {
@@ -70,7 +83,7 @@ private:
     };
     
     static const Command commands[];
-    static const size_t COMMAND_COUNT = 16;
+    static const size_t COMMAND_COUNT = 17;
     
     // 解析命令参数
     String parseCommand(const String& input, String& args);
