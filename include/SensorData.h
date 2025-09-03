@@ -3,6 +3,9 @@
 
 #include <Arduino.h>
 
+// 前向声明
+class BufferPool;
+
 // 传感器数据类型定义
 struct SensorFrame {
     uint8_t sensorId;        // 传感器ID (1-4)
@@ -27,7 +30,7 @@ struct DataBlock {
 // 传感器数据管理类
 class SensorData {
 public:
-    SensorData();
+    SensorData(BufferPool* bufferPool = nullptr);
     ~SensorData();
     
     // 添加新的传感器帧
@@ -59,6 +62,8 @@ private:
     DataBlock* currentBlock;
     QueueHandle_t blockQueue;
     SemaphoreHandle_t mutex;
+    BufferPool* bufferPool;
+    bool ownsBufferPool;
     Stats stats;
     uint32_t lastStatsTime;
     uint32_t frameCountSinceLastStats;

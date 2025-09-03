@@ -1,10 +1,25 @@
 #include "SensorData.h"
 #include "Config.h"
+#include "BufferPool.h"
 
-SensorData::SensorData() {
+SensorData::SensorData(BufferPool* bufferPoolInstance) {
     currentBlock = nullptr;
     blockQueue = xQueueCreate(10, sizeof(DataBlock*));
     mutex = xSemaphoreCreateMutex();
+    
+    // 使用传入的BufferPool实例，如果没有则创建新的
+    if (bufferPoolInstance) {
+        bufferPool = bufferPoolInstance;
+        ownsBufferPool = false;
+        Serial.printf("[SensorData] Using provided BufferPool instance\n");
+    } else {
+        bufferPool = new BufferPool();
+        ownsBufferPool = true;
+        if (bufferPool) {
+            bufferPool->initialize(20);
+        }
+        Serial.printf("[SensorData] Created new BufferPool instance\n");
+    }
     
     // 初始化统计信息
     memset(&stats, 0, sizeof(stats));
@@ -22,7 +37,14 @@ SensorData::~SensorData() {
         vSemaphoreDelete(mutex);
     }
     if (currentBlock) {
-        free(currentBlock);
+        if (bufferPool) {
+            bufferPool->releaseBlock(currentBlock);
+        } else {
+            free(currentBlock);
+        }
+    }
+    if (bufferPool && ownsBufferPool) {
+        delete bufferPool;
     }
 }
 
@@ -58,7 +80,11 @@ bool SensorData::addFrame(const SensorFrame& frame) {
                                          oldBlock->frameCount);
                         }
                         stats.droppedFrames += oldBlock->frameCount;
-                        free(oldBlock);
+                        if (bufferPool) {
+                            bufferPool->releaseBlock(oldBlock);
+                        } else {
+                            free(oldBlock);
+                        }
                     }
                 }
                 
@@ -67,17 +93,23 @@ bool SensorData::addFrame(const SensorFrame& frame) {
                     if (Config::SHOW_DROPPED_PACKETS) {
                         Serial.printf("[SensorData] ERROR: Failed to add block to queue after dropping old data\n");
                     }
-                    free(currentBlock);
+                    if (bufferPool) {
+                        bufferPool->releaseBlock(currentBlock);
+                    } else {
+                        free(currentBlock);
+                    }
                     stats.droppedFrames += currentBlock->frameCount;
+                    currentBlock = nullptr;
                 } else {
                     stats.blocksCreated++;
                     stats.totalFrames += currentBlock->frameCount;
+                    currentBlock = nullptr;
                 }
             } else {
                 stats.blocksCreated++;
                 stats.totalFrames += currentBlock->frameCount;
+                currentBlock = nullptr;
             }
-            currentBlock = nullptr;
         }
         
         frameCountSinceLastStats++;
@@ -99,7 +131,13 @@ DataBlock* SensorData::getNextBlock() {
 
 void SensorData::releaseBlock(DataBlock* block) {
     if (block) {
-        free(block);
+        if (bufferPool) {
+            // 使用BufferPool释放块
+            bufferPool->releaseBlock(block);
+        } else {
+            // 回退到直接释放
+            free(block);
+        }
         stats.blocksSent++;
     }
 }
@@ -137,11 +175,22 @@ void SensorData::updateStats() {
 }
 
 DataBlock* SensorData::createNewBlock() {
-    DataBlock* block = (DataBlock*)malloc(sizeof(DataBlock));
+    DataBlock* block = nullptr;
+    
+    if (bufferPool) {
+        // 使用BufferPool获取块
+        block = bufferPool->acquireBlock();
+    } else {
+        // 回退到直接分配
+        block = (DataBlock*)malloc(sizeof(DataBlock));
+    }
+    
     if (block) {
+        // 初始化块数据
         memset(block, 0, sizeof(DataBlock));
         block->blockId = stats.blocksCreated;
         block->createTime = millis();
     }
+    
     return block;
 }

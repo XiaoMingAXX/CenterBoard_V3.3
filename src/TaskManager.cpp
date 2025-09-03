@@ -47,7 +47,7 @@ bool TaskManager::initialize() {
         return false;
     }
     
-    sensorData = new SensorData();
+    sensorData = new SensorData(bufferPool);
     if (!sensorData) {
         Serial.printf("[TaskManager] ERROR: Failed to initialize SensorData\n");
         return false;
