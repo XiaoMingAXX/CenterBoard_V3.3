@@ -251,7 +251,7 @@ bool TimeSync::syncNtpTime() {
         struct timeval tv;
         gettimeofday(&tv, NULL);
         int64_t ntpTimeMs = (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
-        int64_t espTimeMs = esp_timer_get_time() / 1000;
+        int64_t espTimeMs = millis(); // 使用millis()而不是esp_timer_get_time()
         ntpOffsetMs = ntpTimeMs - espTimeMs;
         ntpInitialized = true;
         

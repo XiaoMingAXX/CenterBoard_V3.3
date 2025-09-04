@@ -192,7 +192,8 @@ void CommandHandler::toggleTimeSync(const String& args) {
     }
     
     TimeSync::Stats stats = timeSync->getStats();
-    bool isActive = stats.syncReady || (timeSync->isTimeSyncReady() == false && stats.totalPairs > 0);
+    // 简化判断逻辑：如果NTP偏移不为0，说明时间同步已启动
+    bool isActive = (stats.ntpOffset != 0);
     
     if (isActive) {
         // 停止时间同步和拟合
@@ -242,9 +243,9 @@ void CommandHandler::showTimeSyncStatus(const String& args) {
         }
         
         Serial.printf("\n使用说明:\n");
-        Serial.printf("  1. 先执行 'timesync' 开始NTP时间同步\n");
-        Serial.printf("  2. 再执行 'startfitting' 开始后台拟合计算\n");
-        Serial.printf("  3. 等待收集足够数据后，时间同步将自动就绪\n");
+        Serial.printf("  1. 执行 'sync' 一键启停时间同步与拟合\n");
+        Serial.printf("  2. 等待收集足够数据后，时间同步将自动就绪\n");
+        Serial.printf("  3. 服务器端也可通过WebSocket发送sync命令控制\n");
     } else {
         Serial.printf("ERROR: 时间同步模块未初始化\n");
     }
