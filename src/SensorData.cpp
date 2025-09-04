@@ -53,9 +53,13 @@ bool SensorData::addFrame(const SensorFrame& frame) {
         // 如果没有当前块或当前块已满，创建新块
         if (!currentBlock || currentBlock->isFull) {
             currentBlock = createNewBlock();
+            
             if (!currentBlock) {
                 xSemaphoreGive(mutex);
                 stats.droppedFrames++;
+                if (Config::SHOW_DROPPED_PACKETS) {
+                    Serial.printf("[SensorData] ERROR: Failed to create new data block，data dropped！\n");
+                }
                 return false;
             }
         }

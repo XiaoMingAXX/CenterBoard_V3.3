@@ -47,6 +47,9 @@ public:
     static const char* DEVICE_CODE;
     static const char* FIRMWARE_VERSION;
     
+    // 数据包配置
+    static const char* SENSOR_DATA_PACKET_TYPE;
+    
     // 调试配置
     static bool SHOW_DROPPED_PACKETS;
     

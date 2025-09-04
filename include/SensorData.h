@@ -19,7 +19,7 @@ struct SensorFrame {
 
 // 批量数据块结构
 struct DataBlock {
-    static const size_t MAX_FRAMES = 50; // 每个块最大帧数
+    static const size_t MAX_FRAMES = 30; // 每个块最大帧数
     SensorFrame frames[MAX_FRAMES];
     uint8_t frameCount;
     uint32_t blockId;

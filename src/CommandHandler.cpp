@@ -330,7 +330,7 @@ void CommandHandler::showBufferStatus(const String& args) {
         Serial.printf("  总帧数: %d\n", dataStats.totalFrames);
         Serial.printf("  丢弃帧数: %d\n", dataStats.droppedFrames);
         Serial.printf("  创建块数: %d\n", dataStats.blocksCreated);
-        Serial.printf("  发送块数: %d\n", dataStats.blocksSent);
+        Serial.printf("  释放块数: %d\n", dataStats.blocksSent);
         Serial.printf("  平均帧率: %.2f fps\n", dataStats.avgFrameRate);
         
         if (dataStats.droppedFrames > 0) {

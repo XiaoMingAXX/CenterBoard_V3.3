@@ -6,6 +6,9 @@
 #include <WebSocketsClient.h>
 #include "SensorData.h"
 
+// 前向声明
+class BufferPool;
+
 // WebSocket客户端类，处理与服务器的通信
 class WebSocketClient {
 public:
@@ -13,7 +16,7 @@ public:
     ~WebSocketClient();
     
     // 初始化网络连接
-    bool initialize(const char* ssid, const char* password, const char* serverUrl, uint16_t port);
+    bool initialize(const char* ssid, const char* password, const char* serverUrl, uint16_t port, const char* deviceCode);
     
     // 连接到服务器
     bool connect();
@@ -67,6 +70,12 @@ public:
     // 处理连接重试
     void handleConnectionRetry();
     
+    // 设置BufferPool实例用于正确释放数据块
+    void setBufferPool(BufferPool* bufferPool);
+    
+    // 手动设置连接状态（用于调试）
+    void setConnectionStatus(bool connected);
+    
 private:
     WebSocketsClient webSocket;
     String serverUrl;
@@ -89,6 +98,9 @@ private:
     QueueHandle_t sendQueue;
     static const size_t MAX_QUEUE_SIZE = 20;
     
+    // BufferPool实例，用于正确释放数据块
+    BufferPool* bufferPool;
+    
     // 创建JSON数据包
     String createDataPacket(DataBlock* block);
     
@@ -100,6 +112,9 @@ private:
     
     // 发送ACK响应
     void sendAckResponse(const String& commandId, bool success);
+    
+    // 发送状态响应
+    void sendStatusResponse(const String& commandId);
     
     // 更新统计信息
     void updateStats();

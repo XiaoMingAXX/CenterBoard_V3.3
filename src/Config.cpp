@@ -5,7 +5,7 @@ const char* Config::WIFI_SSID = "xiaoming";
 const char* Config::WIFI_PASSWORD = "LZMSDSG0704";
 const char* Config::SERVER_URL = "175.178.100.179";
 const uint16_t Config::SERVER_PORT = 8000;
-const char* Config::WEBSOCKET_PATH = "/wxapp/esp32/batch_upload/";
+const char* Config::WEBSOCKET_PATH = "/ws/esp32/";  // 基础路径，device_code会动态添加
 
 // UART配置
 const uint32_t Config::UART_BAUD_RATE = 460800;
@@ -15,11 +15,11 @@ const int Config::UART_RX_PIN = 16;
 // 缓冲区配置
 const size_t Config::RING_BUFFER_SIZE = 4096;
 const size_t Config::BLOCK_POOL_SIZE = 20;
-const size_t Config::MAX_FRAMES_PER_BLOCK = 50;
+const size_t Config::MAX_FRAMES_PER_BLOCK = 30;
 
 // 任务配置
 const uint32_t Config::UART_TASK_STACK_SIZE = 4096;
-const uint32_t Config::NETWORK_TASK_STACK_SIZE = 8192;
+const uint32_t Config::NETWORK_TASK_STACK_SIZE = 16384;  // 从8192增加到16384
 const uint32_t Config::CLI_TASK_STACK_SIZE = 2048;
 const uint32_t Config::MONITOR_TASK_STACK_SIZE = 2048;
 
@@ -41,6 +41,9 @@ const uint32_t Config::HEALTH_CHECK_INTERVAL = 60000; // 60秒
 const char* Config::DEVICE_CODE = "2025001";
 const char* Config::FIRMWARE_VERSION = "V3.3";
 
+// 数据包配置
+const char* Config::SENSOR_DATA_PACKET_TYPE = "batch_sensor_data";
+
 // 调试配置
 bool Config::SHOW_DROPPED_PACKETS = false;
 
@@ -51,7 +54,8 @@ void Config::printConfig() {
     Serial.printf("\n网络配置:\n");
     Serial.printf("  WiFi SSID: %s\n", WIFI_SSID);
     Serial.printf("  服务器地址: %s:%d\n", SERVER_URL, SERVER_PORT);
-    Serial.printf("  WebSocket路径: %s\n", WEBSOCKET_PATH);
+    Serial.printf("  WebSocket路径: %s%s/\n", WEBSOCKET_PATH, DEVICE_CODE);
+    Serial.printf("  数据包类型: %s\n", SENSOR_DATA_PACKET_TYPE);
     Serial.printf("\nUART配置:\n");
     Serial.printf("  波特率: %d\n", UART_BAUD_RATE);
     Serial.printf("  UART1: TX=%d, RX=%d\n", UART_TX_PIN, UART_RX_PIN);

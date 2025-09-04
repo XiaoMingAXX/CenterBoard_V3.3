@@ -1,4 +1,5 @@
 #include "TaskManager.h"
+#include "Config.h"
 
 TaskManager::TaskManager() {
     uartReceiver = nullptr;
@@ -69,6 +70,11 @@ bool TaskManager::initialize() {
     if (!commandHandler || !commandHandler->initialize(uartReceiver, webSocketClient, sensorData)) {
         Serial.printf("[TaskManager] ERROR: Failed to initialize CommandHandler\n");
         return false;
+    }
+    
+    // 设置WebSocketClient的BufferPool实例用于正确释放数据块
+    if (webSocketClient && bufferPool) {
+        webSocketClient->setBufferPool(bufferPool);
     }
     
     Serial.printf("[TaskManager] All modules initialized successfully\n");
@@ -278,7 +284,9 @@ void TaskManager::networkTaskLoop() {
     // 初始化网络连接
     if (webSocketClient) {
         // 从配置中读取网络参数
-        webSocketClient->initialize("xiaoming", "LZMSDSG0704", "175.178.100.179", 8000);
+        webSocketClient->initialize(Config::WIFI_SSID, Config::WIFI_PASSWORD, 
+                                   Config::SERVER_URL, Config::SERVER_PORT, 
+                                   Config::DEVICE_CODE);
         webSocketClient->connect();
     }
     
@@ -299,7 +307,8 @@ void TaskManager::networkTaskLoop() {
                 DataBlock* block = sensorData->getNextBlock();
                 if (block) {
                     webSocketClient->sendDataBlock(block);
-                    sensorData->releaseBlock(block);
+                    // 注意：数据块将在WebSocketClient::processSendQueue()中发送完成后释放
+                    // 这里不再立即释放，避免在发送时访问已释放的内存
                 }
             }
         }
