@@ -117,8 +117,8 @@ uint32_t TimeSync::calculateTimestamp(uint32_t sensorTimeMs) {
     }
     
     // 计算：T = a*S + b + N
-    // 注意：这里需要将微秒转换为毫秒
-    float espTimeMs = paramA * sensorTimeMs + paramB / 1000.0f; // paramB是微秒，转换为毫秒
+    // 注意：现在paramB已经是毫秒单位了
+    float espTimeMs = paramA * sensorTimeMs + paramB;
     uint32_t globalTimeMs = (uint32_t)espTimeMs + ntpOffsetMs;
     
     xSemaphoreGive(mutex);
@@ -281,13 +281,14 @@ bool TimeSync::calculateLinearRegression(float& a, float& b) {
     
     // 最小二乘法计算线性回归参数
     // y = ax + b，其中 x = sensorTimeMs, y = espTimeUs
+    // 注意：传感器时间是毫秒，ESP32时间是微秒，需要统一单位
     float sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
     uint8_t validCount = 0;
     
     for (uint8_t i = 0; i < windowCount; i++) {
         if (slidingWindow[i].valid) {
-            float x = (float)slidingWindow[i].sensorTimeMs;
-            float y = (float)slidingWindow[i].espTimeUs;
+            float x = (float)slidingWindow[i].sensorTimeMs;  // 传感器时间(ms)
+            float y = (float)slidingWindow[i].espTimeUs / 1000.0f;  // ESP32时间转换为ms
             
             sumX += x;
             sumY += y;
@@ -345,6 +346,12 @@ void TimeSync::updateSlidingWindow(uint32_t sensorTimeMs, int64_t espTimeUs) {
     slidingWindow[windowIndex].sensorTimeMs = sensorTimeMs;
     slidingWindow[windowIndex].espTimeUs = espTimeUs;
     slidingWindow[windowIndex].valid = true;
+    
+    // 调试信息：显示前几个时间对
+    if (windowCount < 5) {
+        Serial.printf("[TimeSync] DEBUG: Time pair %d - sensor: %u ms, esp: %lld us\n", 
+                     windowCount, sensorTimeMs, espTimeUs);
+    }
     
     // 更新索引和计数
     windowIndex = (windowIndex + 1) % SLIDING_WINDOW_SIZE;
