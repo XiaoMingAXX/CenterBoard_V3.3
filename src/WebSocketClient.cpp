@@ -9,6 +9,7 @@ static WebSocketClient* g_webSocketClientInstance = nullptr;
 WebSocketClient::WebSocketClient() {
     serverPort = 8080;
     collectionActive = false;
+    uploadCompletePending = false;
     wifiConnected = false;
     serverConnected = false;
     lastConnectionAttempt = 0;
@@ -125,18 +126,21 @@ void WebSocketClient::disconnect() {
 bool WebSocketClient::sendDataBlock(DataBlock* block) {
     // 详细的状态检查
     if (!block) {
+        if(Config::DEBUG_PPRINT)
         Serial.printf("[WebSocketClient] DEBUG: sendDataBlock failed - block is null\n");
         return false;
     }
     
     // 检查连接状态
     if (!serverConnected) {
+        if(Config::DEBUG_PPRINT)
         Serial.printf("[WebSocketClient] DEBUG: sendDataBlock failed - serverConnected=%d\n", 
                      serverConnected);
         return false;
     }
     
     if (!collectionActive) {
+        if(Config::DEBUG_PPRINT)
         Serial.printf("[WebSocketClient] DEBUG: sendDataBlock failed - collection not active (collectionActive=%d)\n", 
                      collectionActive);
         return false;
@@ -149,7 +153,7 @@ bool WebSocketClient::sendDataBlock(DataBlock* block) {
     }
     
     // 成功添加到队列
-    Serial.printf("[WebSocketClient] DEBUG: Data block added to send queue successfully\n");
+    Serial.printf("[WebSocketClient] Data block added to send queue successfully\n");
     return true;
 }
 
@@ -190,7 +194,8 @@ void WebSocketClient::startCollection() {
 
 void WebSocketClient::stopCollection() {
     collectionActive = false;
-    Serial.printf("[WebSocketClient] Data collection stopped\n");
+    uploadCompletePending = true;  // 标记需要发送upload_complete消息
+    Serial.printf("[WebSocketClient] Data collection stopped, upload_complete pending\n");
 }
 
 void WebSocketClient::sendHeartbeat() {
@@ -436,12 +441,37 @@ void WebSocketClient::parseServerCommand(const String& jsonCommand) {
     
     if (commandType == "start_collection") {
         deviceCode = doc["device_code"] | "";
-        sessionId = doc["session_id"] | "";
+        // 支持数字和字符串类型的session_id
+        if (doc.containsKey("session_id")) {
+            if (doc["session_id"].is<int>()) {
+                sessionId = String(doc["session_id"].as<int>());
+            } else if (doc["session_id"].is<String>()) {
+                sessionId = doc["session_id"].as<String>();
+            } else {
+                sessionId = "";
+            }
+        }
         startCollection();
         success = true;
         Serial.printf("[WebSocketClient] Start collection command executed successfully\n");
         
     } else if (commandType == "stop_collection") {
+        // 保存sessionId和deviceCode（如果命令中包含的话）
+        if (doc.containsKey("session_id")) {
+            // 支持数字和字符串类型的session_id
+            if (doc["session_id"].is<int>()) {
+                sessionId = String(doc["session_id"].as<int>());
+            } else if (doc["session_id"].is<String>()) {
+                sessionId = doc["session_id"].as<String>();
+            } else {
+                sessionId = "";
+            }
+            Serial.printf("[WebSocketClient] DEBUG: Saved sessionId: '%s'\n", sessionId.c_str());
+        }
+        if (doc.containsKey("device_code")) {
+            deviceCode = doc["device_code"] | "";
+            Serial.printf("[WebSocketClient] DEBUG: Saved deviceCode: '%s'\n", deviceCode.c_str());
+        }
         stopCollection();
         success = true;
         Serial.printf("[WebSocketClient] Stop collection command executed successfully\n");
@@ -612,5 +642,43 @@ void WebSocketClient::processSendQueue() {
         }
     }
     
+    // 检查是否需要发送upload_complete消息
+    if (uploadCompletePending && uxQueueMessagesWaiting(sendQueue) == 0) {
+        Serial.printf("[WebSocketClient] Send queue is empty, sending upload_complete message\n");
+        sendUploadComplete();
+    }
+    
     updateStats();
+}
+
+void WebSocketClient::sendUploadComplete() {
+    if (!serverConnected) {
+        Serial.printf("[WebSocketClient] Cannot send upload_complete - server not connected\n");
+        return;
+    }
+    
+    Serial.printf("[WebSocketClient] DEBUG: sendUploadComplete - sessionId: '%s' (len=%d), deviceCode: '%s' (len=%d)\n", 
+                 sessionId.c_str(), sessionId.length(), deviceCode.c_str(), deviceCode.length());
+    
+    if (sessionId.length() == 0 || deviceCode.length() == 0) {
+        Serial.printf("[WebSocketClient] Cannot send upload_complete - missing sessionId or deviceCode\n");
+        return;
+    }
+    
+    StaticJsonDocument<256> doc;
+    doc["type"] = "upload_complete";
+    doc["session_id"] = sessionId;
+    doc["device_code"] = deviceCode;
+    doc["timestamp"] = millis();
+    
+    String message;
+    serializeJson(doc, message);
+    
+    bool sendResult = webSocket.sendTXT(message);
+    if (sendResult) {
+        Serial.printf("[WebSocketClient] Upload complete message sent successfully\n");
+        uploadCompletePending = false;  // 重置标志
+    } else {
+        Serial.printf("[WebSocketClient] ERROR: Failed to send upload_complete message\n");
+    }
 }

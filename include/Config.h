@@ -52,6 +52,7 @@ public:
     
     // 调试配置
     static bool SHOW_DROPPED_PACKETS;
+    static bool DEBUG_PPRINT;
     
     // 获取配置信息
     static void printConfig();

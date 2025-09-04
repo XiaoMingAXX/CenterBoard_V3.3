@@ -46,6 +46,7 @@ const char* Config::SENSOR_DATA_PACKET_TYPE = "batch_sensor_data";
 
 // 调试配置
 bool Config::SHOW_DROPPED_PACKETS = false;
+bool Config::DEBUG_PPRINT = false;
 
 void Config::printConfig() {
     Serial.printf("\n=== 系统配置 ===\n");

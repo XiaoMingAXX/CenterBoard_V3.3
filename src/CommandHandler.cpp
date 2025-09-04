@@ -23,7 +23,8 @@ const CommandHandler::Command CommandHandler::commands[] = {
     {"sensors", "显示传感器类型", &CommandHandler::showSensorTypes},
     {"config", "显示配置信息", &CommandHandler::showNetworkConfig},
     {"dropped", "切换显示丢弃数据包", &CommandHandler::toggleDroppedPackets},
-    {"realtime", "实时显示传感器数据", &CommandHandler::showRealtimeData}
+    {"realtime", "实时显示传感器数据", &CommandHandler::showRealtimeData},
+    {"debug", "显示Debug信息", &CommandHandler::showDebugInfo}
 };
 
 CommandHandler::CommandHandler() {
@@ -447,6 +448,18 @@ void CommandHandler::toggleDroppedPackets(const String& args) {
         Serial.printf("现在会显示丢弃数据包的详细信息\n");
     } else {
         Serial.printf("现在不会显示丢弃数据包的详细信息\n");
+    }
+}
+
+void CommandHandler::showDebugInfo(const String& args) {
+    Config::DEBUG_PPRINT = !Config::DEBUG_PPRINT;
+    Serial.printf("[CommandHandler] 显示Debug信息: %s\n", 
+                  Config::DEBUG_PPRINT ? "开启" : "关闭");
+    
+    if (Config::DEBUG_PPRINT) {
+        Serial.printf("现在会显示更多调试信息\n");
+    } else {
+        Serial.printf("现在不会显示额外的调试信息\n");
     }
 }
 

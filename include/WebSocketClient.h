@@ -76,6 +76,9 @@ public:
     // 手动设置连接状态（用于调试）
     void setConnectionStatus(bool connected);
     
+    // 发送上传完成消息
+    void sendUploadComplete();
+    
 private:
     WebSocketsClient webSocket;
     String serverUrl;
@@ -83,6 +86,7 @@ private:
     String deviceCode;
     String sessionId;
     bool collectionActive;
+    bool uploadCompletePending;  // 标记是否等待发送upload_complete消息
     SemaphoreHandle_t mutex;
     Stats stats;
     uint32_t lastStatsTime;

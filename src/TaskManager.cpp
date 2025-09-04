@@ -306,9 +306,15 @@ void TaskManager::networkTaskLoop() {
             if (sensorData) {
                 DataBlock* block = sensorData->getNextBlock();
                 if (block) {
-                    webSocketClient->sendDataBlock(block);
-                    // 注意：数据块将在WebSocketClient::processSendQueue()中发送完成后释放
-                    // 这里不再立即释放，避免在发送时访问已释放的内存
+                    bool sendResult = webSocketClient->sendDataBlock(block);
+                    if (!sendResult) {
+                        // 如果发送失败（队列满或连接问题），需要立即释放数据块避免内存泄漏
+                        sensorData->releaseBlock(block);
+                        if(Config::SHOW_DROPPED_PACKETS){
+                        Serial.printf("[TaskManager] WARNING: Failed to send data block, released to avoid memory leak\n");
+                        }
+                    }
+                    // 注意：成功发送的数据块将在WebSocketClient::processSendQueue()中发送完成后释放
                 }
             }
         }

@@ -83,7 +83,7 @@ private:
     };
     
     static const Command commands[];
-    static const size_t COMMAND_COUNT = 17;
+    static const size_t COMMAND_COUNT = 18;
     
     // 解析命令参数
     String parseCommand(const String& input, String& args);
@@ -99,6 +99,9 @@ private:
     
     // 切换显示丢弃数据包
     void toggleDroppedPackets(const String& args = "");
+
+    // 显示Debug信息
+    void showDebugInfo(const String& args = "");
     
     // 显示UART配置
     void showUartConfig(const String& args = "");

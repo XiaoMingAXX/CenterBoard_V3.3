@@ -150,6 +150,7 @@ bool UartReceiver::validateFrame(const uint8_t* frameData) {
     // 检查传感器ID
     uint8_t sensorId = frameData[FRAME_SIZE - 2];
     if (sensorId < 1 || sensorId > 4) {
+        Serial.println("[UartReceiver] ERROR: Invalid sensor ID");
         return false;
     }
     
