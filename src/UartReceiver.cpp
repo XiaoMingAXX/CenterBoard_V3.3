@@ -2,9 +2,11 @@
 #include "driver/uart.h"
 #include "esp_intr_alloc.h"
 #include "CommandHandler.h"
+#include "TimeSync.h"
 
 UartReceiver::UartReceiver() {
     sensorData = nullptr;
+    timeSync = nullptr;
     ownsSensorData = false;
     ringBuffer = nullptr;
     mutex = xSemaphoreCreateMutex();
@@ -39,7 +41,7 @@ UartReceiver::~UartReceiver() {
     }
 }
 
-bool UartReceiver::initialize(SensorData* sensorDataInstance) {
+bool UartReceiver::initialize(SensorData* sensorDataInstance, TimeSync* timeSyncInstance) {
     if (initialized) {
         return true;
     }
@@ -57,6 +59,14 @@ bool UartReceiver::initialize(SensorData* sensorDataInstance) {
             return false;
         }
         Serial.printf("[UartReceiver] Created new SensorData instance\n");
+    }
+    
+    // 设置时间同步实例
+    timeSync = timeSyncInstance;
+    if (timeSync) {
+        Serial.printf("[UartReceiver] Using provided TimeSync instance\n");
+    } else {
+        Serial.printf("[UartReceiver] WARNING: No TimeSync instance provided\n");
     }
     
     // 初始化单个UART
@@ -161,8 +171,23 @@ SensorFrame UartReceiver::createSensorFrame(const uint8_t* frameData) {
     SensorFrame frame;
     memset(&frame, 0, sizeof(frame));
     
-    // 解析时间戳
+    // 解析传感器时间戳S（毫秒）
     memcpy(&frame.timestamp, &frameData[1], 4);
+    frame.timestamp-- ;     //减去串口传输延时1ms 43*10/460800=0.0009375s
+    
+    // 记录ESP32时间E（微秒精度）
+    int64_t espTimeUs = esp_timer_get_time();
+    
+    // 如果时间同步模块可用，添加时间对到滑动窗口（快速操作）
+    if (timeSync) {
+        timeSync->addTimePair(frame.timestamp, espTimeUs);
+        
+        // 计算同步后的时间戳（快速操作，不进行拟合计算）
+        uint32_t syncedTimestamp = timeSync->calculateTimestamp(frame.timestamp);
+        
+        // 格式化时间戳为时/分/秒/毫秒格式
+        frame.timestamp = timeSync->formatTimestamp(syncedTimestamp);
+    }
     
     // 解析加速度数据
     memcpy(frame.acc, &frameData[5], 12);

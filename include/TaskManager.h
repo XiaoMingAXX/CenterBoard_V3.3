@@ -40,23 +40,27 @@ private:
     TaskHandle_t networkTaskHandle;
     TaskHandle_t cliTaskHandle;
     TaskHandle_t monitorTaskHandle;
+    TaskHandle_t timeSyncTaskHandle;
     
     // 任务函数
     static void uartTask(void* parameter);
     static void networkTask(void* parameter);
     static void cliTask(void* parameter);
     static void monitorTask(void* parameter);
+    static void timeSyncTask(void* parameter);
     
     // 任务配置
     static const uint32_t UART_TASK_STACK_SIZE = 4096;
     static const uint32_t NETWORK_TASK_STACK_SIZE = 8192;
     static const uint32_t CLI_TASK_STACK_SIZE = 4096;  // 增加CLI任务栈大小
     static const uint32_t MONITOR_TASK_STACK_SIZE = 2048;
+    static const uint32_t TIME_SYNC_TASK_STACK_SIZE = 4096;
     
     static const uint32_t UART_TASK_PRIORITY = 3;
     static const uint32_t NETWORK_TASK_PRIORITY = 2;
     static const uint32_t CLI_TASK_PRIORITY = 1;
     static const uint32_t MONITOR_TASK_PRIORITY = 1;
+    static const uint32_t TIME_SYNC_TASK_PRIORITY = 1;
     
     // 任务状态
     bool tasksRunning;
@@ -66,12 +70,14 @@ private:
     bool createNetworkTask();
     bool createCliTask();
     bool createMonitorTask();
+    bool createTimeSyncTask();
     
     // 任务循环
     void uartTaskLoop();
     void networkTaskLoop();
     void cliTaskLoop();
     void monitorTaskLoop();
+    void timeSyncTaskLoop();
 };
 
 #endif // TASK_MANAGER_H

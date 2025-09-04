@@ -13,6 +13,7 @@ TaskManager::TaskManager() {
     networkTaskHandle = nullptr;
     cliTaskHandle = nullptr;
     monitorTaskHandle = nullptr;
+    timeSyncTaskHandle = nullptr;
     
     tasksRunning = false;
     
@@ -55,7 +56,7 @@ bool TaskManager::initialize() {
     }
     
     uartReceiver = new UartReceiver();
-    if (!uartReceiver || !uartReceiver->initialize(sensorData)) {
+    if (!uartReceiver || !uartReceiver->initialize(sensorData, timeSync)) {
         Serial.printf("[TaskManager] ERROR: Failed to initialize UartReceiver\n");
         return false;
     }
@@ -67,7 +68,7 @@ bool TaskManager::initialize() {
     }
     
     commandHandler = new CommandHandler();
-    if (!commandHandler || !commandHandler->initialize(uartReceiver, webSocketClient, sensorData)) {
+    if (!commandHandler || !commandHandler->initialize(uartReceiver, webSocketClient, sensorData, timeSync)) {
         Serial.printf("[TaskManager] ERROR: Failed to initialize CommandHandler\n");
         return false;
     }
@@ -75,6 +76,11 @@ bool TaskManager::initialize() {
     // 设置WebSocketClient的BufferPool实例用于正确释放数据块
     if (webSocketClient && bufferPool) {
         webSocketClient->setBufferPool(bufferPool);
+    }
+    
+    // 设置WebSocketClient的CommandHandler实例用于处理服务器命令
+    if (webSocketClient && commandHandler) {
+        webSocketClient->setCommandHandler(commandHandler);
     }
     
     Serial.printf("[TaskManager] All modules initialized successfully\n");
@@ -107,6 +113,11 @@ bool TaskManager::startTasks() {
     
     if (!createMonitorTask()) {
         Serial.printf("[TaskManager] ERROR: Failed to create monitor task\n");
+        return false;
+    }
+    
+    if (!createTimeSyncTask()) {
+        Serial.printf("[TaskManager] ERROR: Failed to create time sync task\n");
         return false;
     }
     
@@ -143,6 +154,11 @@ void TaskManager::stopTasks() {
         monitorTaskHandle = nullptr;
     }
     
+    if (timeSyncTaskHandle) {
+        vTaskDelete(timeSyncTaskHandle);
+        timeSyncTaskHandle = nullptr;
+    }
+    
     tasksRunning = false;
     Serial.printf("[TaskManager] All tasks stopped\n");
 }
@@ -154,6 +170,7 @@ void TaskManager::getSystemStatus() {
     Serial.printf("网络任务: %s\n", networkTaskHandle ? "运行中" : "未运行");
     Serial.printf("CLI任务: %s\n", cliTaskHandle ? "运行中" : "未运行");
     Serial.printf("监控任务: %s\n", monitorTaskHandle ? "运行中" : "未运行");
+    Serial.printf("时间同步任务: %s\n", timeSyncTaskHandle ? "运行中" : "未运行");
     Serial.printf("================\n\n");
 }
 
@@ -380,6 +397,52 @@ void TaskManager::monitorTaskLoop() {
         if (now - lastStatusTime >= STATUS_INTERVAL) {
             getSystemStatus();
             lastStatusTime = now;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(1000)); // 1秒延迟
+    }
+}
+
+bool TaskManager::createTimeSyncTask() {
+    BaseType_t result = xTaskCreatePinnedToCore(
+        timeSyncTask,
+        "TimeSyncTask",
+        TIME_SYNC_TASK_STACK_SIZE,
+        this,
+        TIME_SYNC_TASK_PRIORITY,
+        &timeSyncTaskHandle,
+        1  // 运行在Core1上
+    );
+    
+    if (result != pdPASS) {
+        Serial.printf("[TaskManager] ERROR: Failed to create time sync task\n");
+        return false;
+    }
+    
+    Serial.printf("[TaskManager] Time sync task created successfully\n");
+    return true;
+}
+
+void TaskManager::timeSyncTask(void* parameter) {
+    TaskManager* manager = (TaskManager*)parameter;
+    manager->timeSyncTaskLoop();
+}
+
+void TaskManager::timeSyncTaskLoop() {
+    Serial.printf("[TimeSync_Task] Started on Core %d\n", xPortGetCoreID());
+    
+    uint32_t lastFittingTime = 0;
+    const uint32_t FITTING_INTERVAL = 5000; // 5秒进行一次拟合计算
+    
+    while (true) {
+        uint32_t now = millis();
+        
+        // 定期进行后台拟合计算
+        if (now - lastFittingTime >= FITTING_INTERVAL) {
+            if (timeSync) {
+                timeSync->performBackgroundFitting();
+            }
+            lastFittingTime = now;
         }
         
         vTaskDelay(pdMS_TO_TICKS(1000)); // 1秒延迟

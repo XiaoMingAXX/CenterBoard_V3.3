@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 #include "BufferPool.h"
 #include "Config.h"
+#include "CommandHandler.h"
 
 // 全局变量，用于静态回调函数访问实例
 static WebSocketClient* g_webSocketClientInstance = nullptr;
@@ -18,6 +19,7 @@ WebSocketClient::WebSocketClient() {
     mutex = xSemaphoreCreateMutex();
     sendQueue = xQueueCreate(MAX_QUEUE_SIZE, sizeof(DataBlock*));
     bufferPool = nullptr;
+    commandHandler = nullptr;
     
     memset(&stats, 0, sizeof(stats));
     lastStatsTime = millis();
@@ -478,13 +480,15 @@ void WebSocketClient::parseServerCommand(const String& jsonCommand) {
         
     } else if (commandType == "sync" || commandType == "SYNC") {
         // 处理时间同步命令
-        if (doc.containsKey("timestamp")) {
-            uint32_t serverTimestamp = doc["timestamp"];
-            // 这里可以调用时间同步模块
-            Serial.printf("[WebSocketClient] Time sync command received, server timestamp: %u\n", serverTimestamp);
+        Serial.printf("[WebSocketClient] Time sync command received from server\n");
+        if (commandHandler) {
+            // 调用CommandHandler的sync命令
+            commandHandler->processCommand("sync");
             success = true;
+            Serial.printf("[WebSocketClient] Time sync command executed successfully\n");
         } else {
-            Serial.printf("[WebSocketClient] ERROR: Sync command missing timestamp\n");
+            Serial.printf("[WebSocketClient] ERROR: CommandHandler not available\n");
+            success = false;
         }
         
     } else if (commandType == "set_batch" || commandType == "SET_BATCH") {
@@ -590,6 +594,11 @@ void WebSocketClient::handleConnectionRetry() {
 void WebSocketClient::setBufferPool(BufferPool* bufferPoolInstance) {
     bufferPool = bufferPoolInstance;
     Serial.printf("[WebSocketClient] BufferPool set\n");
+}
+
+void WebSocketClient::setCommandHandler(CommandHandler* commandHandlerInstance) {
+    commandHandler = commandHandlerInstance;
+    Serial.printf("[WebSocketClient] CommandHandler set\n");
 }
 
 void WebSocketClient::setConnectionStatus(bool connected) {

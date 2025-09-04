@@ -11,7 +11,8 @@ const CommandHandler::Command CommandHandler::commands[] = {
     {"status", "显示系统状态", &CommandHandler::showStatus},
     {"data", "显示传感器数据", &CommandHandler::showSensorData},
     {"test", "测试网络连接", &CommandHandler::testNetwork},
-    {"sync", "执行时间同步", &CommandHandler::syncTime},
+    {"sync", "启停时间同步与拟合过程", &CommandHandler::toggleTimeSync},
+    {"timesyncstatus", "显示时间同步状态", &CommandHandler::showTimeSyncStatus},
     {"batch", "设置批量大小", &CommandHandler::setBatchSize},
     {"start", "开始数据采集", &CommandHandler::startCollection},
     {"stop", "停止数据采集", &CommandHandler::stopCollection},
@@ -31,6 +32,7 @@ CommandHandler::CommandHandler() {
     uartReceiver = nullptr;
     webSocketClient = nullptr;
     sensorData = nullptr;
+    timeSync = nullptr;
     
     Serial.printf("[CommandHandler] Created\n");
 }
@@ -39,12 +41,13 @@ CommandHandler::~CommandHandler() {
     Serial.printf("[CommandHandler] Destroyed\n");
 }
 
-bool CommandHandler::initialize(UartReceiver* receiver, WebSocketClient* client, SensorData* data) {
+bool CommandHandler::initialize(UartReceiver* receiver, WebSocketClient* client, SensorData* data, TimeSync* timeSyncInstance) {
     uartReceiver = receiver;
     webSocketClient = client;
     sensorData = data;
+    timeSync = timeSyncInstance;
     
-    if (!uartReceiver || !webSocketClient || !sensorData) {
+    if (!uartReceiver || !webSocketClient || !sensorData || !timeSync) {
         Serial.printf("[CommandHandler] ERROR: Invalid parameters\n");
         return false;
     }
@@ -178,27 +181,75 @@ void CommandHandler::testNetwork(const String& args) {
 }
 
 void CommandHandler::syncTime(const String& args) {
-    Serial.printf("\n=== 时间同步 ===\n");
-    
-    uint32_t currentTime = millis();
-    Serial.printf("当前系统时间: %d ms\n", currentTime);
-    Serial.printf("系统运行时间: %.2f 秒\n", currentTime / 1000.0f);
-    
-    if (uartReceiver) {
-        UartReceiver::Stats uartStats = uartReceiver->getStats();
-        if (uartStats.totalFramesParsed > 0) {
-            Serial.printf("已接收传感器帧数: %d\n", uartStats.totalFramesParsed);
-            Serial.printf("平均接收速率: %.2f fps\n", 
-                (float)uartStats.totalFramesParsed * 1000.0f / currentTime);
-        }
+    // 直接调用toggleTimeSync方法
+    toggleTimeSync(args);
+}
+
+void CommandHandler::toggleTimeSync(const String& args) {
+    if (!timeSync) {
+        Serial.printf("ERROR: 时间同步模块未初始化\n");
+        return;
     }
     
-    Serial.printf("\n时间同步状态:\n");
-    Serial.printf("  本地时间戳: %d\n", currentTime);
-    Serial.printf("  时间同步: 已启用\n");
-    Serial.printf("  同步精度: 毫秒级\n");
+    TimeSync::Stats stats = timeSync->getStats();
+    bool isActive = stats.syncReady || (timeSync->isTimeSyncReady() == false && stats.totalPairs > 0);
     
-    Serial.printf("================\n\n");
+    if (isActive) {
+        // 停止时间同步和拟合
+        Serial.printf("\n=== 停止时间同步与拟合 ===\n");
+        timeSync->stopTimeSync();
+        timeSync->stopBackgroundFitting();
+        Serial.printf("时间同步与拟合过程已停止\n");
+        Serial.printf("======================\n\n");
+    } else {
+        // 启动时间同步和拟合
+        Serial.printf("\n=== 开始时间同步与拟合 ===\n");
+        if (timeSync->startTimeSync()) {
+            timeSync->startBackgroundFitting();
+            Serial.printf("时间同步与拟合过程已开始\n");
+            Serial.printf("正在同步NTP时间...\n");
+            Serial.printf("拟合计算将在后台任务中每5秒执行一次\n");
+            Serial.printf("请等待传感器数据收集以计算线性回归参数\n");
+        } else {
+            Serial.printf("ERROR: 启动时间同步失败\n");
+            Serial.printf("请检查网络连接和WiFi状态\n");
+        }
+        Serial.printf("======================\n\n");
+    }
+}
+
+void CommandHandler::showTimeSyncStatus(const String& args) {
+    Serial.printf("\n=== 时间同步状态 ===\n");
+    
+    if (timeSync) {
+        TimeSync::Stats stats = timeSync->getStats();
+        
+        Serial.printf("同步状态:\n");
+        Serial.printf("  同步就绪: %s\n", stats.syncReady ? "是" : "否");
+        Serial.printf("  NTP偏移: %lld ms\n", stats.ntpOffset);
+        Serial.printf("  线性参数A: %.6f\n", stats.linearParamA);
+        Serial.printf("  线性参数B: %.2f us\n", stats.linearParamB);
+        Serial.printf("  数据对数量: %d/%d\n", stats.validPairs, stats.windowSize);
+        Serial.printf("  最后更新: %d ms前\n", millis() - stats.lastUpdateTime);
+        
+        if (stats.syncReady) {
+            Serial.printf("\n时间戳计算: T = %.6f * S + %.2f + %lld\n", 
+                         stats.linearParamA, stats.linearParamB, stats.ntpOffset);
+            Serial.printf("其中 S = 传感器时间(ms), T = 全局时间戳(ms)\n");
+        } else {
+            Serial.printf("\n时间同步未就绪，需要更多数据点进行计算\n");
+            Serial.printf("建议至少收集10个有效数据对\n");
+        }
+        
+        Serial.printf("\n使用说明:\n");
+        Serial.printf("  1. 先执行 'timesync' 开始NTP时间同步\n");
+        Serial.printf("  2. 再执行 'startfitting' 开始后台拟合计算\n");
+        Serial.printf("  3. 等待收集足够数据后，时间同步将自动就绪\n");
+    } else {
+        Serial.printf("ERROR: 时间同步模块未初始化\n");
+    }
+    
+    Serial.printf("==================\n\n");
 }
 
 void CommandHandler::setBatchSize(const String& args) {

@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "RingBuffer.h"
 #include "SensorData.h"
+#include "TimeSync.h"
 
 // UART接收器类，处理单个串口的DMA接收，通过ID区分传感器
 class UartReceiver {
@@ -12,7 +13,7 @@ public:
     ~UartReceiver();
     
     // 初始化UART和DMA
-    bool initialize(SensorData* sensorDataInstance = nullptr);
+    bool initialize(SensorData* sensorDataInstance = nullptr, TimeSync* timeSyncInstance = nullptr);
     
     // 启动接收
     bool start();
@@ -53,6 +54,7 @@ private:
     
     RingBuffer* ringBuffer; // 单个UART的环形缓冲区
     SensorData* sensorData;
+    TimeSync* timeSync;
     bool ownsSensorData; // 标记是否拥有SensorData实例
     SemaphoreHandle_t mutex;
     Stats stats;

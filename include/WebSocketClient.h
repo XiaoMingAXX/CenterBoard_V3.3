@@ -8,6 +8,7 @@
 
 // 前向声明
 class BufferPool;
+class CommandHandler;
 
 // WebSocket客户端类，处理与服务器的通信
 class WebSocketClient {
@@ -73,6 +74,9 @@ public:
     // 设置BufferPool实例用于正确释放数据块
     void setBufferPool(BufferPool* bufferPool);
     
+    // 设置CommandHandler实例用于处理服务器命令
+    void setCommandHandler(CommandHandler* commandHandler);
+    
     // 手动设置连接状态（用于调试）
     void setConnectionStatus(bool connected);
     
@@ -104,6 +108,9 @@ private:
     
     // BufferPool实例，用于正确释放数据块
     BufferPool* bufferPool;
+    
+    // CommandHandler实例，用于处理服务器命令
+    CommandHandler* commandHandler;
     
     // 创建JSON数据包
     String createDataPacket(DataBlock* block);

@@ -5,6 +5,7 @@
 #include "UartReceiver.h"
 #include "WebSocketClient.h"
 #include "SensorData.h"
+#include "TimeSync.h"
 
 // CLI命令处理器类
 class CommandHandler {
@@ -13,7 +14,7 @@ public:
     ~CommandHandler();
     
     // 初始化命令处理器
-    bool initialize(UartReceiver* receiver, WebSocketClient* client, SensorData* sensorData);
+    bool initialize(UartReceiver* receiver, WebSocketClient* client, SensorData* sensorData, TimeSync* timeSync);
     
     // 处理输入命令
     void processCommand(const String& command);
@@ -32,6 +33,12 @@ public:
     
     // 执行时间同步
     void syncTime(const String& args = "");
+    
+    // 启停时间同步与拟合过程
+    void toggleTimeSync(const String& args = "");
+    
+    // 显示时间同步状态
+    void showTimeSyncStatus(const String& args = "");
     
     // 设置批量大小
     void setBatchSize(const String& args);
@@ -70,6 +77,7 @@ private:
     UartReceiver* uartReceiver;
     WebSocketClient* webSocketClient;
     SensorData* sensorData;
+    TimeSync* timeSync;
     
     // 实时数据显示控制
     static bool realtimeDataEnabled;
@@ -83,7 +91,7 @@ private:
     };
     
     static const Command commands[];
-    static const size_t COMMAND_COUNT = 18;
+    static const size_t COMMAND_COUNT = 20;
     
     // 解析命令参数
     String parseCommand(const String& input, String& args);
