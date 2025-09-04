@@ -251,11 +251,17 @@ bool TimeSync::syncNtpTime() {
         struct timeval tv;
         gettimeofday(&tv, NULL);
         int64_t ntpTimeMs = (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
-        int64_t espTimeMs = millis(); // 使用millis()而不是esp_timer_get_time()
-        ntpOffsetMs = ntpTimeMs - espTimeMs;
+        
+        // 获取系统启动时间（毫秒）
+        int64_t systemUptimeMs = millis();
+        
+        // 计算NTP时间与系统启动时间的差值
+        // 这个差值表示系统启动时对应的NTP时间
+        ntpOffsetMs = ntpTimeMs - systemUptimeMs;
         ntpInitialized = true;
         
         Serial.printf("[TimeSync] NTP synchronized, offset: %lld ms\n", ntpOffsetMs);
+        Serial.printf("[TimeSync] NTP time: %lld ms, System uptime: %lld ms\n", ntpTimeMs, systemUptimeMs);
         return true;
     } else {
         Serial.printf("[TimeSync] ERROR: NTP synchronization timeout\n");
@@ -320,9 +326,14 @@ bool TimeSync::isValidTimePair(uint32_t sensorTimeMs, int64_t espTimeUs) {
         return false;
     }
     
-    // 检查时间是否合理（传感器时间应该在合理范围内）
-    uint32_t currentMs = millis();
-    if (sensorTimeMs > currentMs + 1000 || sensorTimeMs < currentMs - 86400000) { // 1秒未来，1天过去
+    // 检查传感器时间戳是否在合理范围内（传感器可能运行了很长时间）
+    // 传感器时间戳通常从0开始递增，检查是否在合理范围内
+    if (sensorTimeMs > 0xFFFFFFFF - 1000) { // 避免溢出
+        return false;
+    }
+    
+    // 检查ESP32时间是否合理（微秒）
+    if (espTimeUs > 0x7FFFFFFFFFFFFFFF) { // 避免溢出
         return false;
     }
     
