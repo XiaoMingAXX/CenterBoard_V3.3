@@ -37,6 +37,11 @@ const uint32_t Config::HEARTBEAT_INTERVAL = 30000;    // 30秒
 const uint32_t Config::STATUS_INTERVAL = 30000;       // 30秒
 const uint32_t Config::HEALTH_CHECK_INTERVAL = 60000; // 60秒
 
+// 时间同步配置
+const uint32_t Config::TIME_SYNC_INTERVAL_MS = 2000;        // 2秒
+const uint8_t Config::TIME_SYNC_CALC_COUNT = 3;             // 每个传感器计算3次
+const uint32_t Config::TIME_SYNC_CALC_INTERVAL_MS = 2000;   // 2秒计算一次
+
 // 设备配置
 const char* Config::DEVICE_CODE = "2025001";
 const char* Config::FIRMWARE_VERSION = "V3.3";

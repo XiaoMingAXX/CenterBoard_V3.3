@@ -60,6 +60,9 @@ public:
     // 重置时间同步
     void reset();
     
+    // 重置所有传感器的计算状态（用于重新激活）
+    void resetCalculationState();
+    
     // 获取统计信息
     struct Stats {
         uint32_t totalPairs;
@@ -98,6 +101,13 @@ private:
     float paramA[TIME_SYNC_SENSOR_COUNT]; // 斜率参数a
     float paramB[TIME_SYNC_SENSOR_COUNT]; // 截距参数b
     bool paramsValid[TIME_SYNC_SENSOR_COUNT];
+    
+    // 每个传感器的计算次数和平均值
+    uint8_t calcCount[TIME_SYNC_SENSOR_COUNT];           // 每个传感器已计算次数
+    float paramASum[TIME_SYNC_SENSOR_COUNT];             // 参数A的累加和
+    float paramBSum[TIME_SYNC_SENSOR_COUNT];             // 参数B的累加和
+    bool calcCompleted[TIME_SYNC_SENSOR_COUNT];          // 每个传感器是否完成计算
+    uint32_t lastCalcTime[TIME_SYNC_SENSOR_COUNT];       // 每个传感器上次计算时间
     
     // 互斥锁
     SemaphoreHandle_t mutex;

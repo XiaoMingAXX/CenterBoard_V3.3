@@ -13,6 +13,11 @@ TimeSync::TimeSync() {
         paramA[i] = 1.0f;
         paramB[i] = 0.0f;
         paramsValid[i] = false;
+        calcCount[i] = 0;
+        paramASum[i] = 0.0f;
+        paramBSum[i] = 0.0f;
+        calcCompleted[i] = false;
+        lastCalcTime[i] = 0;
     }
     
     syncActive = false;
@@ -178,19 +183,47 @@ void TimeSync::performBackgroundFitting() {
         return;
     }
     
+    uint32_t currentTime = millis();
+    
     // 为每个传感器进行独立的拟合计算
     for (uint8_t sensorIndex = 0; sensorIndex < TIME_SYNC_SENSOR_COUNT; sensorIndex++) {
+        uint8_t sensorId = sensorIndex + 1; // 转换为传感器ID (1-4)
+        
+        // 如果该传感器已完成计算，跳过
+        if (calcCompleted[sensorIndex]) {
+            continue;
+        }
+        
+        // 检查是否到了计算时间
+        if (currentTime - lastCalcTime[sensorIndex] < Config::TIME_SYNC_CALC_INTERVAL_MS) {
+            continue;
+        }
+        
         // 当窗口有足够数据时，计算线性回归参数
         if (windowCount[sensorIndex] >= 10) { // 至少需要10个数据点
             float tempA, tempB;
-            if (calculateLinearRegression(sensorIndex + 1, tempA, tempB)) { // sensorIndex + 1 转换为传感器ID
-                paramA[sensorIndex] = tempA;
-                paramB[sensorIndex] = tempB;
-                paramsValid[sensorIndex] = true;
-                syncReady[sensorIndex] = true;
+            if (calculateLinearRegression(sensorId, tempA, tempB)) {
+                // 累加参数值
+                paramASum[sensorIndex] += tempA;
+                paramBSum[sensorIndex] += tempB;
+                calcCount[sensorIndex]++;
+                lastCalcTime[sensorIndex] = currentTime;
                 
-                Serial.printf("[TimeSync] Sensor %d fitting completed: a=%.6f, b=%.2f\n", 
-                             sensorIndex + 1, paramA[sensorIndex], paramB[sensorIndex]);
+                Serial.printf("[TimeSync] Sensor %d calculation %d/%d: a=%.6f, b=%.2f\n", 
+                             sensorId, calcCount[sensorIndex], Config::TIME_SYNC_CALC_COUNT, tempA, tempB);
+                
+                // 检查是否完成指定次数的计算
+                if (calcCount[sensorIndex] >= Config::TIME_SYNC_CALC_COUNT) {
+                    // 计算平均值
+                    paramA[sensorIndex] = paramASum[sensorIndex] / calcCount[sensorIndex];
+                    paramB[sensorIndex] = paramBSum[sensorIndex] / calcCount[sensorIndex];
+                    paramsValid[sensorIndex] = true;
+                    syncReady[sensorIndex] = true;
+                    calcCompleted[sensorIndex] = true;
+                    
+                    Serial.printf("[TimeSync] Sensor %d completed: avg_a=%.6f, avg_b=%.2f\n", 
+                                 sensorId, paramA[sensorIndex], paramB[sensorIndex]);
+                }
             }
         }
     }
@@ -257,11 +290,32 @@ void TimeSync::reset() {
         paramB[i] = 0.0f;
         paramsValid[i] = false;
         syncReady[i] = false;
+        calcCount[i] = 0;
+        paramASum[i] = 0.0f;
+        paramBSum[i] = 0.0f;
+        calcCompleted[i] = false;
+        lastCalcTime[i] = 0;
     }
     
     fittingActive = false;
     
     Serial.printf("[TimeSync] Reset all sensors\n");
+}
+
+void TimeSync::resetCalculationState() {
+    if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
+        // 重置所有传感器的计算状态，但保留滑动窗口数据
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            calcCount[i] = 0;
+            paramASum[i] = 0.0f;
+            paramBSum[i] = 0.0f;
+            calcCompleted[i] = false;
+            lastCalcTime[i] = 0;
+            // 不重置syncReady和paramsValid，保持已完成的传感器状态
+        }
+        xSemaphoreGive(mutex);
+        Serial.printf("[TimeSync] Reset calculation state for all sensors\n");
+    }
 }
 
 TimeSync::Stats TimeSync::getStats() const {

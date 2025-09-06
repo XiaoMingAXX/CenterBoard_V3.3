@@ -43,6 +43,11 @@ public:
     static const uint32_t STATUS_INTERVAL;
     static const uint32_t HEALTH_CHECK_INTERVAL;
     
+    // 时间同步配置
+    static const uint32_t TIME_SYNC_INTERVAL_MS;        // 时间同步间隔(毫秒)
+    static const uint8_t TIME_SYNC_CALC_COUNT;          // 每个传感器计算次数
+    static const uint32_t TIME_SYNC_CALC_INTERVAL_MS;   // 参数计算间隔(毫秒)
+    
     // 设备配置
     static const char* DEVICE_CODE;
     static const char* FIRMWARE_VERSION;

@@ -123,6 +123,16 @@ bool TaskManager::startTasks() {
     
     tasksRunning = true;
     Serial.printf("[TaskManager] All tasks started successfully\n");
+    
+    // 开机时自动激活时间同步过程
+    Serial.printf("[TaskManager] Starting initial time synchronization...\n");
+    if (timeSync->startTimeSync()) {
+        timeSync->startBackgroundFitting();
+        Serial.printf("[TaskManager] Initial time synchronization started\n");
+    } else {
+        Serial.printf("[TaskManager] WARNING: Failed to start initial time synchronization\n");
+    }
+    
     return true;
 }
 
@@ -432,7 +442,7 @@ void TaskManager::timeSyncTaskLoop() {
     Serial.printf("[TimeSync_Task] Started on Core %d\n", xPortGetCoreID());
     
     uint32_t lastFittingTime = 0;
-    const uint32_t FITTING_INTERVAL = 5000; // 5秒进行一次拟合计算
+    const uint32_t FITTING_INTERVAL = Config::TIME_SYNC_CALC_INTERVAL_MS; // 使用配置的计算间隔
     
     while (true) {
         uint32_t now = millis();

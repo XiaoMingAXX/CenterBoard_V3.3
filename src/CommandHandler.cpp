@@ -206,10 +206,13 @@ void CommandHandler::toggleTimeSync(const String& args) {
         // 启动时间同步和拟合
         Serial.printf("\n=== 开始时间同步与拟合 ===\n");
         if (timeSync->startTimeSync()) {
+            // 重置计算状态，重新开始计算
+            timeSync->resetCalculationState();
             timeSync->startBackgroundFitting();
             Serial.printf("时间同步与拟合过程已开始\n");
             Serial.printf("正在同步NTP时间...\n");
-            Serial.printf("拟合计算将在后台任务中每5秒执行一次\n");
+            Serial.printf("拟合计算将在后台任务中每%d秒执行一次\n", Config::TIME_SYNC_CALC_INTERVAL_MS / 1000);
+            Serial.printf("每个传感器将进行%d次计算后取平均值\n", Config::TIME_SYNC_CALC_COUNT);
             Serial.printf("请等待传感器数据收集以计算线性回归参数\n");
         } else {
             Serial.printf("ERROR: 启动时间同步失败\n");
@@ -225,21 +228,35 @@ void CommandHandler::showTimeSyncStatus(const String& args) {
     if (timeSync) {
         TimeSync::Stats stats = timeSync->getStats();
         
-        Serial.printf("同步状态:\n");
-        Serial.printf("  同步就绪: %s\n", stats.syncReady ? "是" : "否");
-        Serial.printf("  NTP偏移: %lld ms\n", stats.ntpOffset);
-        Serial.printf("  线性参数A: %.6f\n", stats.linearParamA);
-        Serial.printf("  线性参数B: %.2f us\n", stats.linearParamB);
-        Serial.printf("  数据对数量: %d/%d\n", stats.validPairs, stats.windowSize);
-        Serial.printf("  最后更新: %d ms前\n", millis() - stats.lastUpdateTime);
+        Serial.printf("NTP偏移: %lld ms\n", stats.ntpOffset);
+        Serial.printf("总数据对数量: %d/%d\n", stats.validPairs, stats.windowSize);
+        Serial.printf("最后更新: %d ms前\n", millis() - stats.lastUpdateTime);
         
-        if (stats.syncReady) {
-            Serial.printf("\n时间戳计算: T = %.6f * S + %.2f + %lld\n", 
-                         stats.linearParamA, stats.linearParamB, stats.ntpOffset);
-            Serial.printf("其中 S = 传感器时间(ms), T = 全局时间戳(ms)\n");
+        Serial.printf("\n各传感器状态:\n");
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            Serial.printf("  传感器%d: %s (a=%.6f, b=%.2f)\n", 
+                         i + 1, 
+                         stats.syncReady[i] ? "就绪" : "未就绪",
+                         stats.linearParamA[i], 
+                         stats.linearParamB[i]);
+        }
+        
+        // 检查是否有任何传感器就绪
+        bool anyReady = false;
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            if (stats.syncReady[i]) {
+                anyReady = true;
+                break;
+            }
+        }
+        
+        if (anyReady) {
+            Serial.printf("\n时间戳计算公式: T = a * S + b + N\n");
+            Serial.printf("其中: S = 传感器时间(ms), T = 全局时间戳(ms), N = NTP偏移(ms)\n");
+            Serial.printf("每个传感器有独立的参数 a 和 b\n");
         } else {
             Serial.printf("\n时间同步未就绪，需要更多数据点进行计算\n");
-            Serial.printf("建议至少收集10个有效数据对\n");
+            Serial.printf("建议每个传感器至少收集10个有效数据对\n");
         }
         
         Serial.printf("\n使用说明:\n");
