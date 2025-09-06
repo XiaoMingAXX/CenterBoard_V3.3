@@ -124,15 +124,6 @@ bool TaskManager::startTasks() {
     tasksRunning = true;
     Serial.printf("[TaskManager] All tasks started successfully\n");
     
-    // 开机时自动激活时间同步过程
-    Serial.printf("[TaskManager] Starting initial time synchronization...\n");
-    if (timeSync->startTimeSync()) {
-        timeSync->startBackgroundFitting();
-        Serial.printf("[TaskManager] Initial time synchronization started\n");
-    } else {
-        Serial.printf("[TaskManager] WARNING: Failed to start initial time synchronization\n");
-    }
-    
     return true;
 }
 
@@ -317,7 +308,31 @@ void TaskManager::networkTaskLoop() {
         webSocketClient->connect();
     }
     
+    // 用于跟踪WiFi连接状态和延迟启动时间同步
+    bool wifiConnected = false;
+    bool timeSyncStarted = false;
+    uint32_t wifiConnectTime = 0;
+    
     while (true) {
+        // 检查WiFi连接状态
+        if (WiFi.status() == WL_CONNECTED && !wifiConnected) {
+            wifiConnected = true;
+            wifiConnectTime = millis();
+            Serial.printf("[Network_Task] WiFi connected, will start time sync in 5 seconds\n");
+        }
+        
+        // 在WiFi连接后延迟5秒启动时间同步
+        if (wifiConnected && !timeSyncStarted && (millis() - wifiConnectTime >= 5000)) {
+            timeSyncStarted = true;
+            Serial.printf("[Network_Task] Starting time synchronization after WiFi delay...\n");
+            if (timeSync && timeSync->startTimeSync()) {
+                timeSync->startBackgroundFitting();
+                Serial.printf("[Network_Task] Time synchronization started successfully\n");
+            } else {
+                Serial.printf("[Network_Task] WARNING: Failed to start time synchronization\n");
+            }
+        }
+        
         // 网络任务处理数据发送和服务器通信
         if (webSocketClient) {
             // 处理WebSocket事件
