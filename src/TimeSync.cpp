@@ -4,27 +4,28 @@
 bool TimeSync::ntpCallbackCalled = false;
 
 TimeSync::TimeSync() {
-    // 初始化滑动窗口
-    memset(slidingWindow, 0, sizeof(slidingWindow));
-    windowIndex = 0;
-    windowCount = 0;
+    // 初始化所有传感器的滑动窗口
+    memset(slidingWindows, 0, sizeof(slidingWindows));
+    for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+        windowIndex[i] = 0;
+        windowCount[i] = 0;
+        syncReady[i] = false;
+        paramA[i] = 1.0f;
+        paramB[i] = 0.0f;
+        paramsValid[i] = false;
+    }
+    
     syncActive = false;
     fittingActive = false;
-    syncReady = false;
     
     // 初始化NTP相关
     ntpOffsetMs = 0;
     ntpInitialized = false;
     
-    // 初始化线性回归参数
-    paramA = 1.0f;
-    paramB = 0.0f;
-    paramsValid = false;
-    
     // 创建互斥锁
     mutex = xSemaphoreCreateMutex();
     
-    Serial.printf("[TimeSync] Created\n");
+    Serial.printf("[TimeSync] Created with %d sensors\n", TIME_SYNC_SENSOR_COUNT);
 }
 
 TimeSync::~TimeSync() {
@@ -56,20 +57,24 @@ bool TimeSync::startTimeSync() {
         // 重置状态
         reset();
         syncActive = true;
-        
-        // 开始NTP时间同步
-        if (syncNtpTime()) {
-            Serial.printf("[TimeSync] Started time synchronization\n");
-            xSemaphoreGive(mutex);
-            return true;
-        } else {
-            syncActive = false;
-            Serial.printf("[TimeSync] ERROR: Failed to start NTP synchronization\n");
-            xSemaphoreGive(mutex);
-            return false;
-        }
+        xSemaphoreGive(mutex); // 释放锁，允许addTimePair正常工作
+    } else {
+        return false;
     }
-    return false;
+    
+    // 在锁外进行NTP时间同步（这可能需要几秒钟）
+    if (syncNtpTime()) {
+        Serial.printf("[TimeSync] Started time synchronization\n");
+        return true;
+    } else {
+        // NTP同步失败，重置状态
+        if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
+            syncActive = false;
+            xSemaphoreGive(mutex);
+        }
+        Serial.printf("[TimeSync] ERROR: Failed to start NTP synchronization\n");
+        return false;
+    }
 }
 
 void TimeSync::stopTimeSync() {
@@ -97,28 +102,53 @@ void TimeSync::stopBackgroundFitting() {
     Serial.printf("[TimeSync] Stopped background fitting\n");
 }
 
-void TimeSync::addTimePair(uint32_t sensorTimeMs, int64_t espTimeUs) {
-    if (!syncActive || xSemaphoreTake(mutex, 0) != pdTRUE) {
-        return; // 同步未激活或无法获取锁
+void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs) {
+    // 首先检查同步是否激活
+    if (!syncActive) {
+        return; // 同步未激活，直接返回
+    }
+
+    // 尝试获取互斥锁
+    if (xSemaphoreTake(mutex, 0) != pdTRUE) {
+        Serial.printf("[TimeSync] WARNING: Failed to acquire mutex in addTimePair\n");
+        return; // 无法获取锁，直接返回
+    }
+    
+    // 验证传感器ID有效性
+    if (!isValidSensorId(sensorId)) {
+        Serial.printf("[TimeSync] WARNING: Invalid sensor ID: %d\n", sensorId);
+        xSemaphoreGive(mutex);
+        return;
     }
     
     // 验证时间对的有效性
-    if (isValidTimePair(sensorTimeMs, espTimeUs)) {
-        updateSlidingWindow(sensorTimeMs, espTimeUs);
+    if (isValidTimePair(sensorId, sensorTimeMs, espTimeUs)) {
+        updateSlidingWindow(sensorId, sensorTimeMs, espTimeUs);
         // 注意：不在这里进行拟合计算，避免影响数据接收速度
+    } else {
+        Serial.printf("[TimeSync] WARNING: Invalid time pair: sensorId=%d, sensorTime=%u, espTime=%lld\n", 
+                     sensorId, sensorTimeMs, espTimeUs);
     }
     
     xSemaphoreGive(mutex);
 }
 
-uint32_t TimeSync::calculateTimestamp(uint32_t sensorTimeMs) {
-    if (!syncReady || xSemaphoreTake(mutex, 0) != pdTRUE) {
+uint32_t TimeSync::calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs) {
+    if (!isValidSensorId(sensorId) || xSemaphoreTake(mutex, 0) != pdTRUE) {
         return sensorTimeMs; // 返回原始时间戳
+    }
+    
+    uint8_t sensorIndex = sensorId - 1; // 转换为数组索引 (1-4 -> 0-3)
+    
+    // 如果该传感器的时间同步未就绪，返回原始时间戳
+    if (!syncReady[sensorIndex]) {
+        xSemaphoreGive(mutex);
+        return sensorTimeMs;
     }
     
     // 计算：T = a*S + b + N
     // 注意：现在paramB已经是毫秒单位了
-    float espTimeMs = paramA * sensorTimeMs + paramB;
+    float espTimeMs = paramA[sensorIndex] * sensorTimeMs + paramB[sensorIndex];
     uint32_t globalTimeMs = (uint32_t)espTimeMs + ntpOffsetMs;
     
     xSemaphoreGive(mutex);
@@ -148,16 +178,20 @@ void TimeSync::performBackgroundFitting() {
         return;
     }
     
-    // 当窗口有足够数据时，计算线性回归参数
-    if (windowCount >= 10) { // 至少需要10个数据点
-        float tempA, tempB;
-        if (calculateLinearRegression(tempA, tempB)) {
-            paramA = tempA;
-            paramB = tempB;
-            paramsValid = true;
-            syncReady = true;
-            
-            Serial.printf("[TimeSync] Background fitting completed: a=%.6f, b=%.2f\n", paramA, paramB);
+    // 为每个传感器进行独立的拟合计算
+    for (uint8_t sensorIndex = 0; sensorIndex < TIME_SYNC_SENSOR_COUNT; sensorIndex++) {
+        // 当窗口有足够数据时，计算线性回归参数
+        if (windowCount[sensorIndex] >= 10) { // 至少需要10个数据点
+            float tempA, tempB;
+            if (calculateLinearRegression(sensorIndex + 1, tempA, tempB)) { // sensorIndex + 1 转换为传感器ID
+                paramA[sensorIndex] = tempA;
+                paramB[sensorIndex] = tempB;
+                paramsValid[sensorIndex] = true;
+                syncReady[sensorIndex] = true;
+                
+                Serial.printf("[TimeSync] Sensor %d fitting completed: a=%.6f, b=%.2f\n", 
+                             sensorIndex + 1, paramA[sensorIndex], paramB[sensorIndex]);
+            }
         }
     }
     
@@ -168,53 +202,88 @@ int64_t TimeSync::getNtpOffset() const {
     return ntpOffsetMs;
 }
 
-bool TimeSync::getLinearParams(float& a, float& b) const {
-    if (xSemaphoreTake(mutex, 0) == pdTRUE) {
-        if (paramsValid) {
-            a = paramA;
-            b = paramB;
-            xSemaphoreGive(mutex);
-            return true;
-        }
-        xSemaphoreGive(mutex);
+bool TimeSync::getLinearParams(uint8_t sensorId, float& a, float& b) const {
+    if (!isValidSensorId(sensorId) || xSemaphoreTake(mutex, 0) != pdTRUE) {
+        return false;
     }
+    
+    uint8_t sensorIndex = sensorId - 1; // 转换为数组索引 (1-4 -> 0-3)
+    
+    if (paramsValid[sensorIndex]) {
+        a = paramA[sensorIndex];
+        b = paramB[sensorIndex];
+        xSemaphoreGive(mutex);
+        return true;
+    }
+    
+    xSemaphoreGive(mutex);
     return false;
+}
+
+bool TimeSync::isTimeSyncReady(uint8_t sensorId) const {
+    if (!isValidSensorId(sensorId) || xSemaphoreTake(mutex, 0) != pdTRUE) {
+        return false;
+    }
+    
+    uint8_t sensorIndex = sensorId - 1; // 转换为数组索引 (1-4 -> 0-3)
+    bool ready = syncReady[sensorIndex];
+    xSemaphoreGive(mutex);
+    return ready;
 }
 
 bool TimeSync::isTimeSyncReady() const {
     if (xSemaphoreTake(mutex, 0) == pdTRUE) {
-        bool ready = syncReady;
+        // 检查所有传感器是否都已就绪
+        bool allReady = true;
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            if (!syncReady[i]) {
+                allReady = false;
+                break;
+            }
+        }
         xSemaphoreGive(mutex);
-        return ready;
+        return allReady;
     }
     return false;
 }
 
 void TimeSync::reset() {
-    // 重置滑动窗口
-    memset(slidingWindow, 0, sizeof(slidingWindow));
-    windowIndex = 0;
-    windowCount = 0;
+    // 重置所有传感器的滑动窗口
+    memset(slidingWindows, 0, sizeof(slidingWindows));
+    for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+        windowIndex[i] = 0;
+        windowCount[i] = 0;
+        paramA[i] = 1.0f;
+        paramB[i] = 0.0f;
+        paramsValid[i] = false;
+        syncReady[i] = false;
+    }
     
-    // 重置参数
-    paramA = 1.0f;
-    paramB = 0.0f;
-    paramsValid = false;
-    syncReady = false;
     fittingActive = false;
     
-    Serial.printf("[TimeSync] Reset\n");
+    Serial.printf("[TimeSync] Reset all sensors\n");
 }
 
 TimeSync::Stats TimeSync::getStats() const {
     Stats stats;
     if (xSemaphoreTake(mutex, 0) == pdTRUE) {
-        stats.totalPairs = windowCount;
-        stats.validPairs = windowCount; // 简化处理，假设所有数据都有效
+        // 计算总的数据对数量
+        stats.totalPairs = 0;
+        stats.validPairs = 0;
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            stats.totalPairs += windowCount[i];
+            stats.validPairs += windowCount[i]; // 简化处理，假设所有数据都有效
+        }
+        
         stats.ntpOffset = ntpOffsetMs;
-        stats.linearParamA = paramA;
-        stats.linearParamB = paramB;
-        stats.syncReady = syncReady;
+        
+        // 复制所有传感器的参数
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            stats.linearParamA[i] = paramA[i];
+            stats.linearParamB[i] = paramB[i];
+            stats.syncReady[i] = syncReady[i];
+        }
+        
         stats.lastUpdateTime = millis();
         stats.windowSize = SLIDING_WINDOW_SIZE;
         xSemaphoreGive(mutex);
@@ -274,8 +343,14 @@ void TimeSync::ntpCallback(struct timeval* tv) {
     Serial.printf("[TimeSync] NTP callback called\n");
 }
 
-bool TimeSync::calculateLinearRegression(float& a, float& b) {
-    if (windowCount < 2) {
+bool TimeSync::calculateLinearRegression(uint8_t sensorId, float& a, float& b) {
+    if (!isValidSensorId(sensorId)) {
+        return false;
+    }
+    
+    uint8_t sensorIndex = sensorId - 1; // 转换为数组索引 (1-4 -> 0-3)
+    
+    if (windowCount[sensorIndex] < 2) {
         return false;
     }
     
@@ -285,10 +360,10 @@ bool TimeSync::calculateLinearRegression(float& a, float& b) {
     float sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
     uint8_t validCount = 0;
     
-    for (uint8_t i = 0; i < windowCount; i++) {
-        if (slidingWindow[i].valid) {
-            float x = (float)slidingWindow[i].sensorTimeMs;  // 传感器时间(ms)
-            float y = (float)slidingWindow[i].espTimeUs / 1000.0f;  // ESP32时间转换为ms
+    for (uint8_t i = 0; i < windowCount[sensorIndex]; i++) {
+        if (slidingWindows[sensorIndex][i].valid) {
+            float x = (float)slidingWindows[sensorIndex][i].sensorTimeMs;  // 传感器时间(ms)
+            float y = (float)slidingWindows[sensorIndex][i].espTimeUs / 1000.0f;  // ESP32时间转换为ms
             
             sumX += x;
             sumY += y;
@@ -310,18 +385,22 @@ bool TimeSync::calculateLinearRegression(float& a, float& b) {
         return false; // 避免除零
     }
     
-    a = (n * sumXY - sumX * sumY) / denominator;
+    // a = (n * sumXY - sumX * sumY) / denominator;
+    a = 1;
     b = (sumY - a * sumX) / n;
     
-    paramsValid = true;
-    
-    Serial.printf("[TimeSync] Linear regression: a=%.6f, b=%.2f (valid pairs: %d)\n", 
-                  a, b, validCount);
+    Serial.printf("[TimeSync] Sensor %d linear regression: a=%.6f, b=%.2f (valid pairs: %d)\n", 
+                  sensorId, a, b, validCount);
     
     return true;
 }
 
-bool TimeSync::isValidTimePair(uint32_t sensorTimeMs, int64_t espTimeUs) {
+bool TimeSync::isValidTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs) {
+    // 验证传感器ID
+    if (!isValidSensorId(sensorId)) {
+        return false;
+    }
+    
     // 基本有效性检查
     if (sensorTimeMs == 0 || espTimeUs <= 0) {
         return false;
@@ -341,21 +420,28 @@ bool TimeSync::isValidTimePair(uint32_t sensorTimeMs, int64_t espTimeUs) {
     return true;
 }
 
-void TimeSync::updateSlidingWindow(uint32_t sensorTimeMs, int64_t espTimeUs) {
-    // 添加到滑动窗口
-    slidingWindow[windowIndex].sensorTimeMs = sensorTimeMs;
-    slidingWindow[windowIndex].espTimeUs = espTimeUs;
-    slidingWindow[windowIndex].valid = true;
+void TimeSync::updateSlidingWindow(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs) {
+    uint8_t sensorIndex = sensorId - 1; // 转换为数组索引 (1-4 -> 0-3)
+    
+    // 添加到对应传感器的滑动窗口
+    slidingWindows[sensorIndex][windowIndex[sensorIndex]].sensorId = sensorId;
+    slidingWindows[sensorIndex][windowIndex[sensorIndex]].sensorTimeMs = sensorTimeMs;
+    slidingWindows[sensorIndex][windowIndex[sensorIndex]].espTimeUs = espTimeUs;
+    slidingWindows[sensorIndex][windowIndex[sensorIndex]].valid = true;
     
     // 调试信息：显示前几个时间对
-    if (windowCount < 5) {
-        Serial.printf("[TimeSync] DEBUG: Time pair %d - sensor: %u ms, esp: %lld us\n", 
-                     windowCount, sensorTimeMs, espTimeUs);
+    if (windowCount[sensorIndex] < 5) {
+        Serial.printf("[TimeSync] DEBUG: Sensor %d time pair %d - sensor: %u ms, esp: %lld us\n", 
+                     sensorId, windowCount[sensorIndex], sensorTimeMs, espTimeUs);
     }
     
     // 更新索引和计数
-    windowIndex = (windowIndex + 1) % SLIDING_WINDOW_SIZE;
-    if (windowCount < SLIDING_WINDOW_SIZE) {
-        windowCount++;
+    windowIndex[sensorIndex] = (windowIndex[sensorIndex] + 1) % SLIDING_WINDOW_SIZE;
+    if (windowCount[sensorIndex] < SLIDING_WINDOW_SIZE) {
+        windowCount[sensorIndex]++;
     }
+}
+
+bool TimeSync::isValidSensorId(uint8_t sensorId) const {
+    return (sensorId >= 1 && sensorId <= TIME_SYNC_SENSOR_COUNT);
 }

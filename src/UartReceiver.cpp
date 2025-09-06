@@ -175,18 +175,24 @@ SensorFrame UartReceiver::createSensorFrame(const uint8_t* frameData) {
     memcpy(&frame.timestamp, &frameData[1], 4);
     frame.timestamp-- ;     //减去串口传输延时1ms 43*10/460800=0.0009375s
     
+    // 解析传感器ID（需要先解析，因为时间同步需要用到）
+    frame.sensorId = frameData[FRAME_SIZE - 2];
+    
     // 记录ESP32时间E（微秒精度）
     int64_t espTimeUs = esp_timer_get_time();
     
     // 如果时间同步模块可用，添加时间对到滑动窗口（快速操作）
     if (timeSync) {
-        timeSync->addTimePair(frame.timestamp, espTimeUs);
+
+        timeSync->addTimePair(frame.sensorId, frame.timestamp, espTimeUs);
         
         // 计算同步后的时间戳（快速操作，不进行拟合计算）
-        uint32_t syncedTimestamp = timeSync->calculateTimestamp(frame.timestamp);
+        uint32_t syncedTimestamp = timeSync->calculateTimestamp(frame.sensorId, frame.timestamp);
         
         // 格式化时间戳为时/分/秒/毫秒格式
         frame.timestamp = timeSync->formatTimestamp(syncedTimestamp);
+    } else {
+        Serial.printf("[UartReceiver] WARNING: timeSync is null!\n");
     }
     
     // 解析加速度数据
@@ -197,9 +203,6 @@ SensorFrame UartReceiver::createSensorFrame(const uint8_t* frameData) {
     
     // 解析角度数据
     memcpy(frame.angle, &frameData[29], 12);
-    
-    // 解析传感器ID
-    frame.sensorId = frameData[FRAME_SIZE - 2];
     
     // 设置本地时间戳
     frame.localTimestamp = millis();
