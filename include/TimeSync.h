@@ -57,6 +57,9 @@ public:
     // 检查所有传感器时间同步是否就绪
     bool isTimeSyncReady() const;
     
+    // 检查时间同步是否激活
+    bool isTimeSyncActive() const;
+    
     // 重置时间同步
     void reset();
     

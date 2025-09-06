@@ -286,6 +286,15 @@ bool TimeSync::isTimeSyncReady() const {
     return false;
 }
 
+bool TimeSync::isTimeSyncActive() const {
+    if (xSemaphoreTake(mutex, 0) == pdTRUE) {
+        bool active = syncActive;
+        xSemaphoreGive(mutex);
+        return active;
+    }
+    return false;
+}
+
 void TimeSync::reset() {
     // 重置所有传感器的滑动窗口
     memset(slidingWindows, 0, sizeof(slidingWindows));

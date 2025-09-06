@@ -191,9 +191,8 @@ void CommandHandler::toggleTimeSync(const String& args) {
         return;
     }
     
-    TimeSync::Stats stats = timeSync->getStats();
-    // 简化判断逻辑：如果NTP偏移不为0，说明时间同步已启动
-    bool isActive = (stats.ntpOffset != 0);
+    // 直接检查时间同步是否激活，而不是通过NTP偏移判断
+    bool isActive = timeSync->isTimeSyncActive();
     
     if (isActive) {
         // 停止时间同步和拟合
