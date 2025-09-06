@@ -68,6 +68,12 @@ bool TimeSync::startTimeSync() {
     }
     
     // 在锁外进行NTP时间同步（这可能需要几秒钟）
+    // 如果NTP已经初始化，直接返回成功
+    if (ntpInitialized) {
+        Serial.printf("[TimeSync] NTP already initialized, using existing offset\n");
+        return true;
+    }
+    
     if (syncNtpTime()) {
         Serial.printf("[TimeSync] Started time synchronization\n");
         return true;
@@ -346,6 +352,12 @@ TimeSync::Stats TimeSync::getStats() const {
 }
 
 bool TimeSync::syncNtpTime() {
+    // 如果NTP已经初始化，直接返回成功
+    if (ntpInitialized) {
+        Serial.printf("[TimeSync] NTP already initialized\n");
+        return true;
+    }
+    
     // 配置NTP服务器（使用中国NTP服务器）
     sntp_setoperatingmode(SNTP_OPMODE_POLL);
     sntp_setservername(0, "ntp.aliyun.com");
@@ -395,6 +407,8 @@ bool TimeSync::syncNtpTime() {
 void TimeSync::ntpCallback(struct timeval* tv) {
     ntpCallbackCalled = true;
     Serial.printf("[TimeSync] NTP callback called\n");
+    // 注意：这里不能直接设置ntpInitialized，因为这是静态回调函数
+    // ntpInitialized会在syncNtpTime中设置
 }
 
 bool TimeSync::calculateLinearRegression(uint8_t sensorId, float& a, float& b) {
