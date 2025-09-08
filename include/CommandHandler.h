@@ -91,6 +91,7 @@ private:
     };
     
     static const Command commands[];
+
     static const size_t COMMAND_COUNT = 19;
     
     // 解析命令参数

@@ -37,13 +37,13 @@ public:
     void addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs);
     
     // 计算时间戳：T = a*S + b + N（快速操作）
-    uint32_t calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs);
+    uint64_t calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs);
     
     // 后台拟合计算（在后台任务中调用）
     void performBackgroundFitting();
     
     // 格式化时间戳为时/分/秒/毫秒格式
-    uint32_t formatTimestamp(uint32_t timestampMs);
+    uint32_t formatTimestamp(uint64_t timestampMs);
     
     // 获取NTP时间差N（毫秒）
     int64_t getNtpOffset() const;

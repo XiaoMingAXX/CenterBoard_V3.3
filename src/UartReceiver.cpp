@@ -187,7 +187,7 @@ SensorFrame UartReceiver::createSensorFrame(const uint8_t* frameData) {
         timeSync->addTimePair(frame.sensorId, frame.timestamp, espTimeUs);
         
         // 计算同步后的时间戳（快速操作，不进行拟合计算）
-        uint32_t syncedTimestamp = timeSync->calculateTimestamp(frame.sensorId, frame.timestamp);
+        uint64_t syncedTimestamp = timeSync->calculateTimestamp(frame.sensorId, frame.timestamp);
         
         // 格式化时间戳为时/分/秒/毫秒格式
         frame.timestamp = timeSync->formatTimestamp(syncedTimestamp);

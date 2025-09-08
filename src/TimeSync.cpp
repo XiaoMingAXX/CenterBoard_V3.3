@@ -144,7 +144,7 @@ void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espT
     xSemaphoreGive(mutex);
 }
 
-uint32_t TimeSync::calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs) {
+uint64_t TimeSync::calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs) {
     if (!isValidSensorId(sensorId) || xSemaphoreTake(mutex, 0) != pdTRUE) {
         return sensorTimeMs; // 返回原始时间戳
     }
@@ -160,29 +160,29 @@ uint32_t TimeSync::calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs) {
     // 计算：T = a*S + b + N
     // 注意：现在paramB已经是毫秒单位了
     float espTimeMs = paramA[sensorIndex] * sensorTimeMs + paramB[sensorIndex];
-    uint32_t globalTimeMs = (uint32_t)espTimeMs + ntpOffsetMs;
+    uint64_t globalTimeMs = (uint64_t)espTimeMs + ntpOffsetMs;
     
     xSemaphoreGive(mutex);
     return globalTimeMs;
 }
 
-uint32_t TimeSync::formatTimestamp(uint32_t timestampMs) {
-    // 格式化为时/分/秒/毫秒格式 (HHMMSSmmm)
+uint32_t TimeSync::formatTimestamp(uint64_t timestampMs) {
     time_t timestamp = timestampMs / 1000;
     struct tm* timeinfo = localtime(&timestamp);
-    
-    if (!timeinfo) {
-        return 0;
-    }
-    
-    uint32_t formatted = 0;
-    formatted |= (timeinfo->tm_hour % 24) << 20;  // 时 (5位)
-    formatted |= (timeinfo->tm_min % 60) << 14;   // 分 (6位)
-    formatted |= (timeinfo->tm_sec % 60) << 7;    // 秒 (7位)
-    formatted |= (timestampMs % 1000) & 0x7F;     // 毫秒 (7位)
-    
+    if (!timeinfo) return 0;
+
+    uint32_t ms = timestampMs % 1000;
+
+    // 拼成十进制数：HHMMSSmmm
+    uint32_t formatted = 
+        timeinfo->tm_hour * 10000000 +
+        timeinfo->tm_min  * 100000 +
+        timeinfo->tm_sec  * 1000 +
+        ms;
+
     return formatted;
 }
+
 
 void TimeSync::performBackgroundFitting() {
     if (!fittingActive || xSemaphoreTake(mutex, 0) != pdTRUE) {
@@ -403,7 +403,12 @@ bool TimeSync::syncNtpTime() {
         // 这个差值表示系统启动时对应的NTP时间
         ntpOffsetMs = ntpTimeMs - systemUptimeMs;
         ntpInitialized = true;
-        
+
+        time_t now = time(NULL);
+        struct tm *timeinfo = localtime(&now);
+        Serial.printf("[TimeSync] localtime: %02d:%02d:%02d\n",
+                    timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+
         Serial.printf("[TimeSync] NTP synchronized, offset: %lld ms\n", ntpOffsetMs);
         Serial.printf("[TimeSync] NTP time: %lld ms, System uptime: %lld ms\n", ntpTimeMs, systemUptimeMs);
         return true;
