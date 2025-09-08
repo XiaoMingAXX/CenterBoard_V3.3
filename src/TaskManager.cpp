@@ -223,7 +223,7 @@ bool TaskManager::createNetworkTask() {
         this,
         NETWORK_TASK_PRIORITY,
         &networkTaskHandle,
-        1  // Core 1
+        0  // Core 1
     );
     
     if (result != pdPASS) {
@@ -243,7 +243,7 @@ bool TaskManager::createCliTask() {
         this,
         CLI_TASK_PRIORITY,
         &cliTaskHandle,
-        1  // Core 1
+        0  // Core 1
     );
     
     if (result != pdPASS) {
@@ -263,7 +263,7 @@ bool TaskManager::createMonitorTask() {
         this,
         MONITOR_TASK_PRIORITY,
         &monitorTaskHandle,
-        1  // Core 1
+        0  // Core 1
     );
     
     if (result != pdPASS) {
@@ -386,8 +386,9 @@ void TaskManager::cliTaskLoop() {
             
             char c = Serial.read();
             
-            // 调试：显示接收到的字符（移除频率限制）
-            Serial.printf("[CLI_Task] Received char: 0x%02X ('%c')\n", c, (c >= 32 && c <= 126) ? c : '?');
+            if(Config::DEBUG_PPRINT){
+                Serial.printf("[CLI_Task] Received char: 0x%02X ('%c')\n", c, (c >= 32 && c <= 126) ? c : '?');
+            }
             
             if (c == '\n' || c == '\r') {
                 if (inputBuffer.length() > 0) {
@@ -436,7 +437,7 @@ bool TaskManager::createTimeSyncTask() {
         this,
         TIME_SYNC_TASK_PRIORITY,
         &timeSyncTaskHandle,
-        1  // 运行在Core1上
+        0  // 运行在Core1上
     );
     
     if (result != pdPASS) {

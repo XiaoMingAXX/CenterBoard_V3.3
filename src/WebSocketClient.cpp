@@ -6,6 +6,7 @@
 
 // 全局变量，用于静态回调函数访问实例
 static WebSocketClient* g_webSocketClientInstance = nullptr;
+uint32_t WebSocketClient::lastSendPrintTime = 0;
 
 WebSocketClient::WebSocketClient() {
     serverPort = 8080;
@@ -128,8 +129,8 @@ void WebSocketClient::disconnect() {
 bool WebSocketClient::sendDataBlock(DataBlock* block) {
     // 详细的状态检查
     if (!block) {
-        if(Config::DEBUG_PPRINT)
-        Serial.printf("[WebSocketClient] DEBUG: sendDataBlock failed - block is null\n");
+        
+        Serial.printf("[WebSocketClient] Error: sendDataBlock failed - block is null\n");
         return false;
     }
     
@@ -155,7 +156,10 @@ bool WebSocketClient::sendDataBlock(DataBlock* block) {
     }
     
     // 成功添加到队列
-    Serial.printf("[WebSocketClient] Data block added to send queue successfully\n");
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient] Data block added to send queue successfully\n");
+    }
+
     return true;
 }
 
@@ -258,8 +262,10 @@ String WebSocketClient::createDataPacket(DataBlock* block) {
     
     // 创建数据数组
     JsonArray data = doc.createNestedArray("data");
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient]  Creating data packet with %d frames (expected: 30)\n", block->frameCount);
+    }
     
-    Serial.printf("[WebSocketClient] DEBUG: Creating data packet with %d frames (expected: 30)\n", block->frameCount);
     
     if (block->frameCount < 30) {
         Serial.printf("[WebSocketClient] WARNING: Data block has only %d frames, expected 30!\n", block->frameCount);
@@ -332,30 +338,39 @@ String WebSocketClient::createDataPacket(DataBlock* block) {
         frame["sensor_id"] = block->frames[i].sensorId;
         
         // 时间戳（使用原始时间戳，避免精度丢失）
-        frame["timestamp"] = (uint64_t)block->frames[i].rawTimestamp;
+        frame["timestamp"] = block->frames[i].timestamp;
         
         // 成功处理了一帧
         successfulFrames++;
         
         // 调试信息：检查最后一个帧
         if (i == block->frameCount - 1) {
-            Serial.printf("[WebSocketClient] DEBUG: Last frame %d - acc: [%f, %f, %f], gyro: [%f, %f, %f]\n", 
-                         i, block->frames[i].acc[0], block->frames[i].acc[1], block->frames[i].acc[2],
-                         block->frames[i].gyro[0], block->frames[i].gyro[1], block->frames[i].gyro[2]);
+            if(Config::DEBUG_PPRINT){
+                Serial.printf("[WebSocketClient] DEBUG: Last frame %d - acc: [%f, %f, %f], gyro: [%f, %f, %f]\n", 
+                            i, block->frames[i].acc[0], block->frames[i].acc[1], block->frames[i].acc[2],
+                            block->frames[i].gyro[0], block->frames[i].gyro[1], block->frames[i].gyro[2]);
+            }
         }
     }
     
-    Serial.printf("[WebSocketClient] DEBUG: Successfully processed %d out of %d frames\n", successfulFrames, block->frameCount);
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient] DEBUG: Successfully processed %d out of %d frames\n", successfulFrames, block->frameCount);
+    }
+   
     
     // 添加会话ID（如果存在）
     if (sessionId.length() > 0) {
         doc["session_id"] = sessionId;
     }
-    
-    // 检查JSON文档大小
+
     size_t docSize = measureJson(doc);
-    Serial.printf("[WebSocketClient] DEBUG: JSON document size: %d bytes, max capacity: %d bytes\n", 
-                 docSize, doc.capacity());
+    // 检查JSON文档大小
+    if(Config::DEBUG_PPRINT){
+     
+        Serial.printf("[WebSocketClient] DEBUG: JSON document size: %d bytes, max capacity: %d bytes\n", 
+                    docSize, doc.capacity());
+    }
+
     
     if (docSize >= doc.capacity()) {
         Serial.printf("[WebSocketClient] ERROR: JSON document too large! Size: %d, Capacity: %d\n", 
@@ -370,8 +385,10 @@ String WebSocketClient::createDataPacket(DataBlock* block) {
         Serial.printf("[WebSocketClient] ERROR: Failed to serialize JSON document\n");
         return "";
     }
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient] DEBUG: JSON serialized size: %d bytes\n", bytesWritten);
+    }
     
-    Serial.printf("[WebSocketClient] DEBUG: JSON serialized successfully, %d bytes written\n", bytesWritten);
     
     // 验证序列化结果
     if (bytesWritten != docSize) {
@@ -384,7 +401,10 @@ String WebSocketClient::createDataPacket(DataBlock* block) {
 
 void WebSocketClient::webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
     // 通过全局实例指针访问WebSocketClient实例
-    Serial.printf("[WebSocketClient] WebSocket event: %d\n", type);
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient] webSocketEvent called with type: %d, length: %d\n", type, length);
+    }
+
     
     switch (type) {
         case WStype_DISCONNECTED:
@@ -404,7 +424,13 @@ void WebSocketClient::webSocketEvent(WStype_t type, uint8_t* payload, size_t len
             break;
             
         case WStype_TEXT:
-            Serial.printf("[WebSocketClient] Received: %s\n", payload);
+            if (Config::DEBUG_PPRINT)
+            {
+                Serial.printf("[WebSocketClient] Received text message of length %d\n", length);
+                Serial.printf("[WebSocketClient] Received: %s\n", payload);
+            }
+            
+            
             // 处理服务器命令
             if (g_webSocketClientInstance) {
                 String command = String((char*)payload);
@@ -438,8 +464,10 @@ void WebSocketClient::parseServerCommand(const String& jsonCommand) {
     String commandType = doc["type"] | doc["command"] | "";
     String commandId = doc["command_id"] | doc["id"] | "";
     bool success = false;
-    
-    Serial.printf("[WebSocketClient] Processing command: %s (ID: %s)\n", commandType.c_str(), commandId.c_str());
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient] DEBUG: Parsed command type: %s, command ID: %s\n", commandType.c_str(), commandId.c_str());
+    }
+  
     
     if (commandType == "start_collection") {
         deviceCode = doc["device_code"] | "";
@@ -514,7 +542,13 @@ void WebSocketClient::parseServerCommand(const String& jsonCommand) {
         success = true;
         Serial.printf("[WebSocketClient] Heartbeat command processed\n");
         
-    } else {
+    } else if (commandType == "batch_sensor_data_response" ) {
+       
+        if(Config::DEBUG_PPRINT){
+            Serial.printf("[WebSocketClient] DEBUG: Received batch_sensor_data_response: %s\n", jsonCommand.c_str());
+        }
+        success = true;
+    }else {
         Serial.printf("[WebSocketClient] Unknown command: %s\n", commandType.c_str());
         success = false;
     }
@@ -613,27 +647,39 @@ void WebSocketClient::processSendQueue() {
     DataBlock* block = nullptr;
     
     while (xQueueReceive(sendQueue, &block, 0) == pdTRUE) {
-        Serial.printf("[WebSocketClient] DEBUG: Processing block from queue - block: %p, serverConnected: %d, collectionActive: %d\n", 
-                     block, serverConnected, collectionActive);
-        
+        if(Config::DEBUG_PPRINT){
+            Serial.printf("[WebSocketClient] DEBUG: Processing block from queue - block: %p, serverConnected: %d, collectionActive: %d\n", 
+                        block, serverConnected, collectionActive);
+        }
         if (block && serverConnected && collectionActive) {
             String dataPacket = createDataPacket(block);
-            Serial.printf("[WebSocketClient] DEBUG: Created data packet, length: %d bytes\n", dataPacket.length());
-            
+       
             bool sendResult = webSocket.sendTXT(dataPacket);
-            Serial.printf("[WebSocketClient] DEBUG: sendTXT result: %d\n", sendResult);
+            if(Config::DEBUG_PPRINT){
+                Serial.printf("[WebSocketClient] DEBUG: Created data packet, length: %d bytes\n", dataPacket.length());
+                Serial.printf("[WebSocketClient] DEBUG: sendTXT result: %d\n", sendResult);
+            }
+            
             
             if (sendResult) {
                 stats.totalBlocksSent++;
                 stats.totalBytesSent += dataPacket.length();
                 blocksSentSinceLastStats++;
-                Serial.printf("[WebSocketClient] DEBUG: Data block sent successfully\n");
+
+                uint32_t now = millis();
+
+                if(now - lastSendPrintTime > 2000){ // 每2秒打印一次
+                    Serial.printf("[WebSocketClient] Sent block %d, size: %d bytes,sendSinceLastStats: %d,sendQueueSize: %d\n", 
+                                stats.totalBlocksSent, stats.totalBytesSent, blocksSentSinceLastStats++, uxQueueMessagesWaiting(sendQueue));
+                    lastSendPrintTime = now;
+                }
             } else {
                 stats.sendFailures++;
-                Serial.printf("[WebSocketClient] ERROR: Failed to send data block - WebSocket sendTXT returned false\n");
+                    Serial.printf("[WebSocketClient] ERROR: Failed to send data block - WebSocket sendTXT returned false\n");
+
             }
         } else {
-            Serial.printf("[WebSocketClient] DEBUG: Block not sent - block: %p, serverConnected: %d, collectionActive: %d\n", 
+            Serial.printf("[WebSocketClient] WARNING: Block not sent - block: %p, serverConnected: %d, collectionActive: %d\n", 
                          block, serverConnected, collectionActive);
         }
         
@@ -642,11 +688,13 @@ void WebSocketClient::processSendQueue() {
             if (bufferPool) {
                 // 使用BufferPool正确释放数据块
                 bufferPool->releaseBlock(block);
-                Serial.printf("[WebSocketClient] DEBUG: Block released to BufferPool\n");
+                if(Config::DEBUG_PPRINT){
+                    Serial.printf("[WebSocketClient] DEBUG: Block released to BufferPool\n");
+                }
             } else {
                 // 如果没有BufferPool，直接释放（不推荐）
                 free(block);
-                Serial.printf("[WebSocketClient] DEBUG: Block freed directly\n");
+                Serial.printf("[WebSocketClient] Warning: Block freed directly\n");
             }
         }
     }
@@ -662,15 +710,15 @@ void WebSocketClient::processSendQueue() {
 
 void WebSocketClient::sendUploadComplete() {
     if (!serverConnected) {
-        Serial.printf("[WebSocketClient] Cannot send upload_complete - server not connected\n");
+        Serial.printf("[WebSocketClient] ERROR:Cannot send upload_complete - server not connected\n");
         return;
     }
-    
-    Serial.printf("[WebSocketClient] DEBUG: sendUploadComplete - sessionId: '%s' (len=%d), deviceCode: '%s' (len=%d)\n", 
-                 sessionId.c_str(), sessionId.length(), deviceCode.c_str(), deviceCode.length());
-    
+    if(Config::DEBUG_PPRINT){
+        Serial.printf("[WebSocketClient] DEBUG: sendUploadComplete - sessionId: '%s' (len=%d), deviceCode: '%s' (len=%d)\n", 
+                    sessionId.c_str(), sessionId.length(), deviceCode.c_str(), deviceCode.length());
+    }
     if (sessionId.length() == 0 || deviceCode.length() == 0) {
-        Serial.printf("[WebSocketClient] Cannot send upload_complete - missing sessionId or deviceCode\n");
+        Serial.printf("[WebSocketClient] ERROR:Cannot send upload_complete - missing sessionId or deviceCode\n");
         return;
     }
     

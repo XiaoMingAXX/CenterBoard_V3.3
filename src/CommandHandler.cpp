@@ -556,9 +556,9 @@ void CommandHandler::displayRealtimeSensorData(const SensorFrame& frame) {
     
     // 限制显示频率，避免刷屏
     uint32_t now = millis();
-    if (now - lastRealtimeDataTime < 100) { // 100ms间隔
-        return;
-    }
+    // if (now - lastRealtimeDataTime < 100) { // 100ms间隔
+    //     return;
+    // }
     lastRealtimeDataTime = now;
     
     // 显示传感器数据

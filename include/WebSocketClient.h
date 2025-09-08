@@ -88,13 +88,14 @@ private:
     String serverUrl;
     uint16_t serverPort;
     String deviceCode;
-    String sessionId;
+    String sessionId = "041025";
     bool collectionActive;
     bool uploadCompletePending;  // 标记是否等待发送upload_complete消息
     SemaphoreHandle_t mutex;
     Stats stats;
     uint32_t lastStatsTime;
     uint32_t blocksSentSinceLastStats;
+    static uint32_t lastSendPrintTime;
     
     // 网络状态
     bool wifiConnected;
