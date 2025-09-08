@@ -189,6 +189,9 @@ SensorFrame UartReceiver::createSensorFrame(const uint8_t* frameData) {
         // 计算同步后的时间戳（快速操作，不进行拟合计算）
         uint64_t syncedTimestamp = timeSync->calculateTimestamp(frame.sensorId, frame.timestamp);
         
+        // 保存原始时间戳
+        frame.rawTimestamp = syncedTimestamp;
+        
         // 格式化时间戳为时/分/秒/毫秒格式
         frame.timestamp = timeSync->formatTimestamp(syncedTimestamp);
     } else {
@@ -204,8 +207,10 @@ SensorFrame UartReceiver::createSensorFrame(const uint8_t* frameData) {
     // 解析角度数据
     memcpy(frame.angle, &frameData[29], 12);
     
-    // 设置本地时间戳
-    frame.localTimestamp = millis();
+    // 设置本地时间戳（如果没有时间同步，使用原始时间戳）
+    if (!timeSync) {
+        frame.rawTimestamp = frame.timestamp;
+    }
     
     // 验证数据有效性
     frame.valid = true;

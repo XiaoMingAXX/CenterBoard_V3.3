@@ -116,7 +116,7 @@ private:
     void showUartConfig(const String& args = "");
     
     // 格式化时间戳
-    String formatTimestamp(uint32_t timestamp);
+    String formatTimestamp(uint64_t timestamp);
     
     // 格式化浮点数
     String formatFloat(float value, int precision = 2);

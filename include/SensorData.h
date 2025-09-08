@@ -9,8 +9,8 @@ class BufferPool;
 // 传感器数据类型定义
 struct SensorFrame {
     uint8_t sensorId;        // 传感器ID (1-4)
-    uint32_t timestamp;      // 原始时间戳
-    uint32_t localTimestamp; // 本地接收时间戳
+    uint32_t timestamp;      // 格式化后的时间戳 (HHMMSSmmm格式)
+    uint64_t rawTimestamp;   // 原始时间戳 (毫秒)
     float acc[3];           // 加速度 x,y,z
     float gyro[3];          // 角速度 x,y,z
     float angle[3];         // 角度 x,y,z

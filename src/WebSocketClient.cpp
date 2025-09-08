@@ -331,8 +331,8 @@ String WebSocketClient::createDataPacket(DataBlock* block) {
         // 传感器ID
         frame["sensor_id"] = block->frames[i].sensorId;
         
-        // 时间戳
-        frame["timestamp"] = block->frames[i].timestamp;
+        // 时间戳（使用原始时间戳，避免精度丢失）
+        frame["timestamp"] = (uint64_t)block->frames[i].rawTimestamp;
         
         // 成功处理了一帧
         successfulFrames++;

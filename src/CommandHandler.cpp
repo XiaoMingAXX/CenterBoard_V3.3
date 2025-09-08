@@ -496,8 +496,8 @@ void CommandHandler::showUartConfig(const String& args) {
     Serial.printf("===============\n\n");
 }
 
-String CommandHandler::formatTimestamp(uint32_t timestamp) {
-    uint32_t seconds = timestamp / 1000;
+String CommandHandler::formatTimestamp(uint64_t timestamp) {
+    uint64_t seconds = timestamp / 1000;
     uint32_t milliseconds = timestamp % 1000;
     
     return String(seconds) + "." + String(milliseconds);
@@ -563,8 +563,8 @@ void CommandHandler::displayRealtimeSensorData(const SensorFrame& frame) {
     
     // 显示传感器数据
     const char* sensorType = SensorData::getSensorType(frame.sensorId);
-    Serial.printf("[实时数据] %s(ID%d) - 时间戳:%u, 加速度:[%.2f,%.2f,%.2f], 角速度:[%.2f,%.2f,%.2f], 角度:[%.2f,%.2f,%.2f]\n",
-                  sensorType, frame.sensorId, frame.timestamp,
+    Serial.printf("[实时数据] %s(ID%d) - 时间戳:%u, 原始时间戳:%llu, 加速度:[%.2f,%.2f,%.2f], 角速度:[%.2f,%.2f,%.2f], 角度:[%.2f,%.2f,%.2f]\n",
+                  sensorType, frame.sensorId, frame.timestamp, frame.rawTimestamp,
                   frame.acc[0], frame.acc[1], frame.acc[2],
                   frame.gyro[0], frame.gyro[1], frame.gyro[2],
                   frame.angle[0], frame.angle[1], frame.angle[2]);

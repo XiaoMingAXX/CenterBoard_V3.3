@@ -30,9 +30,9 @@ bool startTimeSync();                    // 开始时间同步过程
 void startBackgroundFitting();           // 开始后台拟合计算
 void stopBackgroundFitting();            // 停止后台拟合计算
 void addTimePair(uint32_t sensorTimeMs, int64_t espTimeUs);  // 添加时间对（快速）
-uint32_t calculateTimestamp(uint32_t sensorTimeMs);          // 计算同步时间戳（快速）
+uint64_t calculateTimestamp(uint8_t sensorId, uint32_t sensorTimeMs);  // 计算同步时间戳（快速）
 void performBackgroundFitting();         // 后台拟合计算
-uint32_t formatTimestamp(uint32_t timestampMs);              // 格式化时间戳
+uint32_t formatTimestamp(uint64_t timestampMs);              // 格式化时间戳
 ```
 
 **滑动窗口配置:**
