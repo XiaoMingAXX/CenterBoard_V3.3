@@ -91,7 +91,7 @@ private:
     };
     
     static const Command commands[];
-    static const size_t COMMAND_COUNT = 20;
+    static const size_t COMMAND_COUNT = 19;
     
     // 解析命令参数
     String parseCommand(const String& input, String& args);
