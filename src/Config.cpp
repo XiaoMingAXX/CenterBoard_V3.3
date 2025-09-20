@@ -8,7 +8,7 @@ const uint16_t Config::SERVER_PORT = 8000;
 const char* Config::WEBSOCKET_PATH = "/ws/esp32/";  // 基础路径，device_code会动态添加
 
 // UART配置
-const uint32_t Config::UART_BAUD_RATE = 460800;
+const uint32_t Config::UART_BAUD_RATE = 115200;
 const int Config::UART_TX_PIN = 17;
 const int Config::UART_RX_PIN = 16;
 

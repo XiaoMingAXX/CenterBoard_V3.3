@@ -243,7 +243,7 @@ bool TaskManager::createCliTask() {
         this,
         CLI_TASK_PRIORITY,
         &cliTaskHandle,
-        0  // Core 1
+        1  // Core 1
     );
     
     if (result != pdPASS) {
