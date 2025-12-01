@@ -172,6 +172,8 @@ void TaskManager::getSystemStatus() {
     Serial.printf("CLI任务: %s\n", cliTaskHandle ? "运行中" : "未运行");
     Serial.printf("监控任务: %s\n", monitorTaskHandle ? "运行中" : "未运行");
     Serial.printf("时间同步任务: %s\n", timeSyncTaskHandle ? "运行中" : "未运行");
+    
+    
     Serial.printf("================\n\n");
 }
 
@@ -331,6 +333,7 @@ void TaskManager::networkTaskLoop() {
             } else {
                 Serial.printf("[Network_Task] WARNING: Failed to start time synchronization\n");
             }
+            
         }
         
         // 网络任务处理数据发送和服务器通信

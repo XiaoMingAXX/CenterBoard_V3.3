@@ -22,6 +22,7 @@ UartReceiver::UartReceiver() {
     
     memset(&stats, 0, sizeof(stats));
     
+    
     Serial.printf("[UartReceiver] Created with single UART receiver + DMA\n");
 }
 
@@ -315,6 +316,7 @@ void UartReceiver::processDmaData() {
 }
 
 // ESP32-S3的UART驱动自动处理中断，不需要自定义中断处理函数
+
 
 void UartReceiver::dmaReceiveCallback(const uint8_t* data, size_t length) {
     // DMA接收回调函数（如果需要的话）
