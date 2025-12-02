@@ -7,7 +7,7 @@ BufferPool::BufferPool() {
     
     memset(&stats, 0, sizeof(stats));
     
-    Serial.printf("[BufferPool] Created\n");
+    Serial0.printf("[BufferPool] Created\n");
 }
 
 BufferPool::~BufferPool() {
@@ -18,7 +18,7 @@ BufferPool::~BufferPool() {
         vSemaphoreDelete(mutex);
     }
     
-    Serial.printf("[BufferPool] Destroyed\n");
+    Serial0.printf("[BufferPool] Destroyed\n");
 }
 
 bool BufferPool::initialize(size_t poolSize) {
@@ -27,21 +27,21 @@ bool BufferPool::initialize(size_t poolSize) {
     // 创建互斥锁
     mutex = xSemaphoreCreateMutex();
     if (!mutex) {
-        Serial.printf("[BufferPool] ERROR: Failed to create mutex\n");
+        Serial0.printf("[BufferPool] ERROR: Failed to create mutex\n");
         return false;
     }
     
     // 创建块队列
     blockQueue = xQueueCreate(poolSize, sizeof(DataBlock*));
     if (!blockQueue) {
-        Serial.printf("[BufferPool] ERROR: Failed to create block queue\n");
+        Serial0.printf("[BufferPool] ERROR: Failed to create block queue\n");
         return false;
     }
     
     // 预分配数据块
     preallocateBlocks();
     
-    Serial.printf("[BufferPool] Initialized with %d blocks\n", poolSize);
+    Serial0.printf("[BufferPool] Initialized with %d blocks\n", poolSize);
     return true;
 }
 
@@ -135,7 +135,7 @@ void BufferPool::preallocateBlocks() {
         if (block) {
             if (xQueueSend(blockQueue, &block, 0) != pdTRUE) {
                 free(block);
-                Serial.printf("[BufferPool] WARNING: Failed to add block %d to queue\n", i);
+                Serial0.printf("[BufferPool] WARNING: Failed to add block %d to queue\n", i);
             }
         }
     }
@@ -146,7 +146,7 @@ void BufferPool::preallocateBlocks() {
         xSemaphoreGive(mutex);
     }
     
-    Serial.printf("[BufferPool] Preallocated %d blocks\n", poolSize);
+    Serial0.printf("[BufferPool] Preallocated %d blocks\n", poolSize);
 }
 
 DataBlock* BufferPool::createBlock() {

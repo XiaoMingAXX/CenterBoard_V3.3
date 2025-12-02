@@ -1,3 +1,31 @@
-ID1 EA:AA:DF:A8:54:00
-ID2 BB:DD:E9:09:67:00
-ID3 F0:C5:DB:7B:75:00
+ID2 EA:AA:DF:A8:54:00
+ID1 BB:DD:E9:09:67:00
+ID3 AC:A2:91:23:E5:00
+
+连接命令
+
+测试命令
+"AT/r/n"
+返回
+"+OK/r/n"
+
+扫描蓝牙设备(扫描2秒后返回扫描结果)
+"AT+SCAN=1,2,1/r/n"
+返回
+"+OK/r/n"
+2秒后
+"0 59:4E:0B:12:3E:34 -80 NZK1XEgMlqYP4Mm7ixi57HB9A/r/n"
+"1 59:4E:0B:12:3E:34 -80 NZK1XEgMlqYP4Mm7ixi57HB9A/r/n"
+"2 D6:9D:09:1B:9E:0F -77 SIMGOT EH500/r/n"
+"3 74:04:9D:5B:97:91 -93 EDIFIER BLE/r/n"
+"4 BB:DD:E9:09:67:00 -28 CDEBYTE_BLE/r/n"
+
+连接命令
+"AT+CONNECT=4/r/n"
+返回
+"+OK/r/n"
+
+连接成功
+"BB:DD:E9:09:67:00 CONNECTD"
+连接断开
+"BB:DD:E9:09:67:00 DISCONNECTD"

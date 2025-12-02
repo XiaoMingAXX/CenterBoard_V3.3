@@ -54,33 +54,33 @@ bool Config::SHOW_DROPPED_PACKETS = false;
 bool Config::DEBUG_PPRINT = false;
 
 void Config::printConfig() {
-    Serial.printf("\n=== 系统配置 ===\n");
-    Serial.printf("固件版本: %s\n", FIRMWARE_VERSION);
-    Serial.printf("设备编码: %s\n", DEVICE_CODE);
-    Serial.printf("\n网络配置:\n");
-    Serial.printf("  WiFi SSID: %s\n", WIFI_SSID);
-    Serial.printf("  服务器地址: %s:%d\n", SERVER_URL, SERVER_PORT);
-    Serial.printf("  WebSocket路径: %s%s/\n", WEBSOCKET_PATH, DEVICE_CODE);
-    Serial.printf("  数据包类型: %s\n", SENSOR_DATA_PACKET_TYPE);
-    Serial.printf("\nUART配置:\n");
-    Serial.printf("  波特率: %d\n", UART_BAUD_RATE);
-    Serial.printf("  UART1: TX=%d, RX=%d\n", UART_TX_PIN, UART_RX_PIN);
-    Serial.printf("\n缓冲区配置:\n");
-    Serial.printf("  环形缓冲区大小: %d bytes\n", RING_BUFFER_SIZE);
-    Serial.printf("  块池大小: %d blocks\n", BLOCK_POOL_SIZE);
-    Serial.printf("  每块最大帧数: %d\n", MAX_FRAMES_PER_BLOCK);
-    Serial.printf("\n任务配置:\n");
-    Serial.printf("  UART任务: 栈大小=%d, 优先级=%d\n", UART_TASK_STACK_SIZE, UART_TASK_PRIORITY);
-    Serial.printf("  网络任务: 栈大小=%d, 优先级=%d\n", NETWORK_TASK_STACK_SIZE, NETWORK_TASK_PRIORITY);
-    Serial.printf("  CLI任务: 栈大小=%d, 优先级=%d\n", CLI_TASK_STACK_SIZE, CLI_TASK_PRIORITY);
-    Serial.printf("  监控任务: 栈大小=%d, 优先级=%d\n", MONITOR_TASK_STACK_SIZE, MONITOR_TASK_PRIORITY);
-    Serial.printf("\n时间配置:\n");
-    Serial.printf("  心跳间隔: %d ms\n", HEARTBEAT_INTERVAL);
-    Serial.printf("  状态间隔: %d ms\n", STATUS_INTERVAL);
-    Serial.printf("  健康检查间隔: %d ms\n", HEALTH_CHECK_INTERVAL);
-    Serial.printf("\n调试配置:\n");
-    Serial.printf("  显示丢弃数据包: %s\n", SHOW_DROPPED_PACKETS ? "开启" : "关闭");
-    Serial.printf("================\n\n");
+    Serial0.printf("\n=== 系统配置 ===\n");
+    Serial0.printf("固件版本: %s\n", FIRMWARE_VERSION);
+    Serial0.printf("设备编码: %s\n", DEVICE_CODE);
+    Serial0.printf("\n网络配置:\n");
+    Serial0.printf("  WiFi SSID: %s\n", WIFI_SSID);
+    Serial0.printf("  服务器地址: %s:%d\n", SERVER_URL, SERVER_PORT);
+    Serial0.printf("  WebSocket路径: %s%s/\n", WEBSOCKET_PATH, DEVICE_CODE);
+    Serial0.printf("  数据包类型: %s\n", SENSOR_DATA_PACKET_TYPE);
+    Serial0.printf("\nUART配置:\n");
+    Serial0.printf("  波特率: %d\n", UART_BAUD_RATE);
+    Serial0.printf("  UART1: TX=%d, RX=%d\n", UART_TX_PIN, UART_RX_PIN);
+    Serial0.printf("\n缓冲区配置:\n");
+    Serial0.printf("  环形缓冲区大小: %d bytes\n", RING_BUFFER_SIZE);
+    Serial0.printf("  块池大小: %d blocks\n", BLOCK_POOL_SIZE);
+    Serial0.printf("  每块最大帧数: %d\n", MAX_FRAMES_PER_BLOCK);
+    Serial0.printf("\n任务配置:\n");
+    Serial0.printf("  UART任务: 栈大小=%d, 优先级=%d\n", UART_TASK_STACK_SIZE, UART_TASK_PRIORITY);
+    Serial0.printf("  网络任务: 栈大小=%d, 优先级=%d\n", NETWORK_TASK_STACK_SIZE, NETWORK_TASK_PRIORITY);
+    Serial0.printf("  CLI任务: 栈大小=%d, 优先级=%d\n", CLI_TASK_STACK_SIZE, CLI_TASK_PRIORITY);
+    Serial0.printf("  监控任务: 栈大小=%d, 优先级=%d\n", MONITOR_TASK_STACK_SIZE, MONITOR_TASK_PRIORITY);
+    Serial0.printf("\n时间配置:\n");
+    Serial0.printf("  心跳间隔: %d ms\n", HEARTBEAT_INTERVAL);
+    Serial0.printf("  状态间隔: %d ms\n", STATUS_INTERVAL);
+    Serial0.printf("  健康检查间隔: %d ms\n", HEALTH_CHECK_INTERVAL);
+    Serial0.printf("\n调试配置:\n");
+    Serial0.printf("  显示丢弃数据包: %s\n", SHOW_DROPPED_PACKETS ? "开启" : "关闭");
+    Serial0.printf("================\n\n");
 }
 
 bool Config::validateConfig() {
@@ -88,60 +88,60 @@ bool Config::validateConfig() {
     
     // 验证网络配置
     if (strlen(WIFI_SSID) == 0) {
-        Serial.printf("[Config] ERROR: WiFi SSID not configured\n");
+        Serial0.printf("[Config] ERROR: WiFi SSID not configured\n");
         valid = false;
     }
     
     if (strlen(WIFI_PASSWORD) == 0) {
-        Serial.printf("[Config] ERROR: WiFi password not configured\n");
+        Serial0.printf("[Config] ERROR: WiFi password not configured\n");
         valid = false;
     }
     
     if (strlen(SERVER_URL) == 0) {
-        Serial.printf("[Config] ERROR: Server URL not configured\n");
+        Serial0.printf("[Config] ERROR: Server URL not configured\n");
         valid = false;
     }
     
     if (SERVER_PORT == 0) {
-        Serial.printf("[Config] ERROR: Server port not configured\n");
+        Serial0.printf("[Config] ERROR: Server port not configured\n");
         valid = false;
     }
     
     // 验证UART配置
     if (UART_BAUD_RATE == 0) {
-        Serial.printf("[Config] ERROR: UART baud rate not configured\n");
+        Serial0.printf("[Config] ERROR: UART baud rate not configured\n");
         valid = false;
     }
     
     // 验证缓冲区配置
     if (RING_BUFFER_SIZE == 0) {
-        Serial.printf("[Config] ERROR: Ring buffer size not configured\n");
+        Serial0.printf("[Config] ERROR: Ring buffer size not configured\n");
         valid = false;
     }
     
     if (BLOCK_POOL_SIZE == 0) {
-        Serial.printf("[Config] ERROR: Block pool size not configured\n");
+        Serial0.printf("[Config] ERROR: Block pool size not configured\n");
         valid = false;
     }
     
     if (MAX_FRAMES_PER_BLOCK == 0) {
-        Serial.printf("[Config] ERROR: Max frames per block not configured\n");
+        Serial0.printf("[Config] ERROR: Max frames per block not configured\n");
         valid = false;
     }
     
     // 验证任务配置
     if (UART_TASK_STACK_SIZE < 1024) {
-        Serial.printf("[Config] WARNING: UART task stack size too small\n");
+        Serial0.printf("[Config] WARNING: UART task stack size too small\n");
     }
     
     if (NETWORK_TASK_STACK_SIZE < 2048) {
-        Serial.printf("[Config] WARNING: Network task stack size too small\n");
+        Serial0.printf("[Config] WARNING: Network task stack size too small\n");
     }
     
     if (valid) {
-        Serial.printf("[Config] Configuration validation passed\n");
+        Serial0.printf("[Config] Configuration validation passed\n");
     } else {
-        Serial.printf("[Config] Configuration validation failed\n");
+        Serial0.printf("[Config] Configuration validation failed\n");
     }
     
     return valid;

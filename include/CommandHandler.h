@@ -7,6 +7,9 @@
 #include "SensorData.h"
 #include "TimeSync.h"
 
+// 前向声明
+class BluetoothConfig;
+
 // CLI命令处理器类
 class CommandHandler {
 public:
@@ -16,8 +19,14 @@ public:
     // 初始化命令处理器
     bool initialize(UartReceiver* receiver, WebSocketClient* client, SensorData* sensorData, TimeSync* timeSync);
     
-    // 处理输入命令
+    // 设置蓝牙配置模块
+    void setBluetoothConfig(BluetoothConfig* btConfig);
+    
+    // 处理输入命令（从Serial0）
     void processCommand(const String& command);
+    
+    // 处理单个字符输入（用于CLI任务）
+    void processChar(char c);
     
     // 显示帮助信息
     void showHelp(const String& args = "");
@@ -78,6 +87,10 @@ private:
     WebSocketClient* webSocketClient;
     SensorData* sensorData;
     TimeSync* timeSync;
+    BluetoothConfig* bluetoothConfig;
+    
+    // 命令输入缓冲区
+    String inputBuffer;
     
     // 实时数据显示控制
     static bool realtimeDataEnabled;
@@ -92,7 +105,7 @@ private:
     
     static const Command commands[];
 
-    static const size_t COMMAND_COUNT = 19;
+    static const size_t COMMAND_COUNT = 22;
     
     // 解析命令参数
     String parseCommand(const String& input, String& args);
@@ -111,6 +124,15 @@ private:
 
     // 显示Debug信息
     void showDebugInfo(const String& args = "");
+    
+    // 切换蓝牙配置模式
+    void toggleBluetoothConfig(const String& args = "");
+    
+    // 测试LED
+    void testLED(const String& args = "");
+    
+    // 测试按钮
+    void testButton(const String& args = "");
     
     // 显示UART配置
     void showUartConfig(const String& args = "");

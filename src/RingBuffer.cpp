@@ -3,7 +3,7 @@
 RingBuffer::RingBuffer(size_t bufferSize) : size(bufferSize) {
     buffer = (uint8_t*)malloc(size);
     if (!buffer) {
-        Serial.printf("[RingBuffer] ERROR: Failed to allocate %d bytes\n", size);
+        Serial0.printf("[RingBuffer] ERROR: Failed to allocate %d bytes\n", size);
         size = 0;
     }
     
@@ -14,7 +14,7 @@ RingBuffer::RingBuffer(size_t bufferSize) : size(bufferSize) {
     
     memset(&stats, 0, sizeof(stats));
     
-    Serial.printf("[RingBuffer] Initialized with size: %d bytes\n", size);
+    Serial0.printf("[RingBuffer] Initialized with size: %d bytes\n", size);
 }
 
 RingBuffer::~RingBuffer() {
@@ -39,7 +39,7 @@ bool RingBuffer::write(const uint8_t* data, size_t length) {
             size_t overflowBytes = length - writeSpace;
             readPos = (readPos + overflowBytes) % size;
             dataLength = size;
-            Serial.printf("[RingBuffer] WARNING: Buffer overflow, dropped %d bytes\n", overflowBytes);
+            Serial0.printf("[RingBuffer] WARNING: Buffer overflow, dropped %d bytes\n", overflowBytes);
         }
         
         // 写入数据

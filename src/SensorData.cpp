@@ -11,14 +11,14 @@ SensorData::SensorData(BufferPool* bufferPoolInstance) {
     if (bufferPoolInstance) {
         bufferPool = bufferPoolInstance;
         ownsBufferPool = false;
-        Serial.printf("[SensorData] Using provided BufferPool instance\n");
+        Serial0.printf("[SensorData] Using provided BufferPool instance\n");
     } else {
         bufferPool = new BufferPool();
         ownsBufferPool = true;
         if (bufferPool) {
             bufferPool->initialize(20);
         }
-        Serial.printf("[SensorData] Created new BufferPool instance\n");
+        Serial0.printf("[SensorData] Created new BufferPool instance\n");
     }
     
     // 初始化统计信息
@@ -26,7 +26,7 @@ SensorData::SensorData(BufferPool* bufferPoolInstance) {
     lastStatsTime = millis();
     frameCountSinceLastStats = 0;
     
-    Serial.printf("[SensorData] Initialized with block queue size: 10\n");
+    Serial0.printf("[SensorData] Initialized with block queue size: 10\n");
 }
 
 SensorData::~SensorData() {
@@ -58,7 +58,7 @@ bool SensorData::addFrame(const SensorFrame& frame) {
                 xSemaphoreGive(mutex);
                 stats.droppedFrames++;
                 if (Config::SHOW_DROPPED_PACKETS) {
-                    Serial.printf("[SensorData] ERROR: Failed to create new data block，data dropped！\n");
+                    Serial0.printf("[SensorData] ERROR: Failed to create new data block，data dropped！\n");
                 }
                 return false;
             }
@@ -80,7 +80,7 @@ bool SensorData::addFrame(const SensorFrame& frame) {
                 if (xQueueReceive(blockQueue, &oldBlock, 0) == pdTRUE) {
                     if (oldBlock) {
                         if (Config::SHOW_DROPPED_PACKETS) {
-                            Serial.printf("[SensorData] WARNING: Block queue full, dropped old block with %d frames\n", 
+                            Serial0.printf("[SensorData] WARNING: Block queue full, dropped old block with %d frames\n", 
                                          oldBlock->frameCount);
                         }
                         stats.droppedFrames += oldBlock->frameCount;
@@ -95,7 +95,7 @@ bool SensorData::addFrame(const SensorFrame& frame) {
                 // 再次尝试添加新数据块
                 if (xQueueSend(blockQueue, &currentBlock, 0) != pdTRUE) {
                     if (Config::SHOW_DROPPED_PACKETS) {
-                        Serial.printf("[SensorData] ERROR: Failed to add block to queue after dropping old data\n");
+                        Serial0.printf("[SensorData] ERROR: Failed to add block to queue after dropping old data\n");
                     }
                     if (bufferPool) {
                         bufferPool->releaseBlock(currentBlock);

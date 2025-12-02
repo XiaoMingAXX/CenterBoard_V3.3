@@ -6,27 +6,27 @@ TaskManager* taskManager = nullptr;
 
 void setup() {
   // 初始化串口
-  Serial.begin(115200);
+  Serial0.begin(921600);
   delay(1000);
   
-  Serial.printf("\n");
-  Serial.printf("========================================\n");
-  Serial.printf("    ESP32-S3 传感器网关系统启动\n");
-  Serial.printf("    版本: V3.3\n");
-  Serial.printf("    编译时间: %s %s\n", __DATE__, __TIME__);
-  Serial.printf("========================================\n");
-  Serial.printf("\n");
+  Serial0.printf("\n");
+  Serial0.printf("========================================\n");
+  Serial0.printf("    ESP32-S3 传感器网关系统启动\n");
+  Serial0.printf("    版本: V3.3\n");
+  Serial0.printf("    编译时间: %s %s\n", __DATE__, __TIME__);
+  Serial0.printf("========================================\n");
+  Serial0.printf("\n");
   
   // 创建任务管理器
   taskManager = new TaskManager();
   if (!taskManager) {
-    Serial.printf("[MAIN] ERROR: Failed to create TaskManager\n");
+    Serial0.printf("[MAIN] ERROR: Failed to create TaskManager\n");
     return;
   }
   
   // 初始化任务管理器
   if (!taskManager->initialize()) {
-    Serial.printf("[MAIN] ERROR: Failed to initialize TaskManager\n");
+    Serial0.printf("[MAIN] ERROR: Failed to initialize TaskManager\n");
     delete taskManager;
     taskManager = nullptr;
     return;
@@ -34,15 +34,15 @@ void setup() {
   
   // 启动所有任务
   if (!taskManager->startTasks()) {
-    Serial.printf("[MAIN] ERROR: Failed to start tasks\n");
+    Serial0.printf("[MAIN] ERROR: Failed to start tasks\n");
     delete taskManager;
     taskManager = nullptr;
     return;
   }
   
-  Serial.printf("[MAIN] System initialized successfully\n");
-  Serial.printf("[MAIN] Type 'help' for available commands\n");
-  Serial.printf("\n");
+  Serial0.printf("[MAIN] System initialized successfully\n");
+  Serial0.printf("[MAIN] Type 'help' for available commands\n");
+  Serial0.printf("\n");
 }
 
 void loop() {

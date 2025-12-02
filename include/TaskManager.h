@@ -7,6 +7,7 @@
 #include "CommandHandler.h"
 #include "TimeSync.h"
 #include "BufferPool.h"
+#include "BluetoothConfig.h"
 
 // 任务管理器类
 class TaskManager {
@@ -34,6 +35,7 @@ private:
     TimeSync* timeSync;
     BufferPool* bufferPool;
     SensorData* sensorData;
+    BluetoothConfig* bluetoothConfig;
     
     // 任务句柄
     TaskHandle_t uartTaskHandle;
@@ -41,6 +43,7 @@ private:
     TaskHandle_t cliTaskHandle;
     TaskHandle_t monitorTaskHandle;
     TaskHandle_t timeSyncTaskHandle;
+    TaskHandle_t bluetoothConfigTaskHandle;
     
     // 任务函数
     static void uartTask(void* parameter);
@@ -48,6 +51,7 @@ private:
     static void cliTask(void* parameter);
     static void monitorTask(void* parameter);
     static void timeSyncTask(void* parameter);
+    static void bluetoothConfigTask(void* parameter);
     
     // 任务配置
     static const uint32_t UART_TASK_STACK_SIZE = 4096;
@@ -55,12 +59,14 @@ private:
     static const uint32_t CLI_TASK_STACK_SIZE = 4096;  // 增加CLI任务栈大小
     static const uint32_t MONITOR_TASK_STACK_SIZE = 2048;
     static const uint32_t TIME_SYNC_TASK_STACK_SIZE = 4096;
+    static const uint32_t BLUETOOTH_CONFIG_TASK_STACK_SIZE = 4096;
     
     static const uint32_t UART_TASK_PRIORITY = 3;
     static const uint32_t NETWORK_TASK_PRIORITY = 2;
     static const uint32_t CLI_TASK_PRIORITY = 1;
     static const uint32_t MONITOR_TASK_PRIORITY = 1;
     static const uint32_t TIME_SYNC_TASK_PRIORITY = 1;
+    static const uint32_t BLUETOOTH_CONFIG_TASK_PRIORITY = 2;  // 较高优先级，保证配置模式响应及时
     
     // 任务状态
     bool tasksRunning;
@@ -71,6 +77,7 @@ private:
     bool createCliTask();
     bool createMonitorTask();
     bool createTimeSyncTask();
+    bool createBluetoothConfigTask();
     
     // 任务循环
     void uartTaskLoop();
@@ -78,6 +85,7 @@ private:
     void cliTaskLoop();
     void monitorTaskLoop();
     void timeSyncTaskLoop();
+    void bluetoothConfigTaskLoop();
 };
 
 #endif // TASK_MANAGER_H

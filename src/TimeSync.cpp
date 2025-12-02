@@ -30,7 +30,7 @@ TimeSync::TimeSync() {
     // 创建互斥锁
     mutex = xSemaphoreCreateMutex();
     
-    Serial.printf("[TimeSync] Created with %d sensors\n", TIME_SYNC_SENSOR_COUNT);
+    Serial0.printf("[TimeSync] Created with %d sensors\n", TIME_SYNC_SENSOR_COUNT);
 }
 
 TimeSync::~TimeSync() {
@@ -38,7 +38,7 @@ TimeSync::~TimeSync() {
     if (mutex) {
         vSemaphoreDelete(mutex);
     }
-    Serial.printf("[TimeSync] Destroyed\n");
+    Serial0.printf("[TimeSync] Destroyed\n");
 }
 
 bool TimeSync::initialize() {
@@ -48,7 +48,7 @@ bool TimeSync::initialize() {
         xSemaphoreGive(mutex);
     }
     
-    Serial.printf("[TimeSync] Initialized\n");
+    Serial0.printf("[TimeSync] Initialized\n");
     return true;
 }
 
@@ -70,12 +70,12 @@ bool TimeSync::startTimeSync() {
     // 在锁外进行NTP时间同步（这可能需要几秒钟）
     // 如果NTP已经初始化，直接返回成功
     if (ntpInitialized) {
-        Serial.printf("[TimeSync] NTP already initialized, using existing offset\n");
+        Serial0.printf("[TimeSync] NTP already initialized, using existing offset\n");
         return true;
     }
     
     if (syncNtpTime()) {
-        Serial.printf("[TimeSync] Started time synchronization\n");
+        Serial0.printf("[TimeSync] Started time synchronization\n");
         return true;
     } else {
         // NTP同步失败，重置状态
@@ -83,7 +83,7 @@ bool TimeSync::startTimeSync() {
             syncActive = false;
             xSemaphoreGive(mutex);
         }
-        Serial.printf("[TimeSync] ERROR: Failed to start NTP synchronization\n");
+        Serial0.printf("[TimeSync] ERROR: Failed to start NTP synchronization\n");
         return false;
     }
 }
@@ -94,7 +94,7 @@ void TimeSync::stopTimeSync() {
         sntp_stop();
         xSemaphoreGive(mutex);
     }
-    Serial.printf("[TimeSync] Stopped time synchronization\n");
+    Serial0.printf("[TimeSync] Stopped time synchronization\n");
 }
 
 void TimeSync::startBackgroundFitting() {
@@ -102,7 +102,7 @@ void TimeSync::startBackgroundFitting() {
         fittingActive = true;
         xSemaphoreGive(mutex);
     }
-    Serial.printf("[TimeSync] Started background fitting\n");
+    Serial0.printf("[TimeSync] Started background fitting\n");
 }
 
 void TimeSync::stopBackgroundFitting() {
@@ -110,7 +110,7 @@ void TimeSync::stopBackgroundFitting() {
         fittingActive = false;
         xSemaphoreGive(mutex);
     }
-    Serial.printf("[TimeSync] Stopped background fitting\n");
+    Serial0.printf("[TimeSync] Stopped background fitting\n");
 }
 
 void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs) {
@@ -121,13 +121,13 @@ void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espT
 
     // 尝试获取互斥锁
     if (xSemaphoreTake(mutex, 0) != pdTRUE) {
-        Serial.printf("[TimeSync] WARNING: Failed to acquire mutex in addTimePair\n");
+        Serial0.printf("[TimeSync] WARNING: Failed to acquire mutex in addTimePair\n");
         return; // 无法获取锁，直接返回
     }
     
     // 验证传感器ID有效性
     if (!isValidSensorId(sensorId)) {
-        Serial.printf("[TimeSync] WARNING: Invalid sensor ID: %d\n", sensorId);
+        Serial0.printf("[TimeSync] WARNING: Invalid sensor ID: %d\n", sensorId);
         xSemaphoreGive(mutex);
         return;
     }
@@ -137,7 +137,7 @@ void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espT
         updateSlidingWindow(sensorId, sensorTimeMs, espTimeUs);
         // 注意：不在这里进行拟合计算，避免影响数据接收速度
     } else {
-        Serial.printf("[TimeSync] WARNING: Invalid time pair: sensorId=%d, sensorTime=%u, espTime=%lld\n", 
+        Serial0.printf("[TimeSync] WARNING: Invalid time pair: sensorId=%d, sensorTime=%u, espTime=%lld\n", 
                      sensorId, sensorTimeMs, espTimeUs);
     }
     
@@ -215,7 +215,7 @@ void TimeSync::performBackgroundFitting() {
                 calcCount[sensorIndex]++;
                 lastCalcTime[sensorIndex] = currentTime;
                 
-                Serial.printf("[TimeSync] Sensor %d calculation %d/%d: a=%.6f, b=%.2f\n", 
+                Serial0.printf("[TimeSync] Sensor %d calculation %d/%d: a=%.6f, b=%.2f\n", 
                              sensorId, calcCount[sensorIndex], Config::TIME_SYNC_CALC_COUNT, tempA, tempB);
                 
                 // 检查是否完成指定次数的计算
@@ -227,7 +227,7 @@ void TimeSync::performBackgroundFitting() {
                     syncReady[sensorIndex] = true;
                     calcCompleted[sensorIndex] = true;
                     
-                    Serial.printf("[TimeSync] Sensor %d completed: avg_a=%.6f, avg_b=%.2f\n", 
+                    Serial0.printf("[TimeSync] Sensor %d completed: avg_a=%.6f, avg_b=%.2f\n", 
                                  sensorId, paramA[sensorIndex], paramB[sensorIndex]);
                 }
             }
@@ -314,7 +314,7 @@ void TimeSync::reset() {
     
     fittingActive = false;
     
-    Serial.printf("[TimeSync] Reset all sensors\n");
+    Serial0.printf("[TimeSync] Reset all sensors\n");
 }
 
 void TimeSync::resetCalculationState() {
@@ -329,7 +329,7 @@ void TimeSync::resetCalculationState() {
             // 不重置syncReady和paramsValid，保持已完成的传感器状态
         }
         xSemaphoreGive(mutex);
-        Serial.printf("[TimeSync] Reset calculation state for all sensors\n");
+        Serial0.printf("[TimeSync] Reset calculation state for all sensors\n");
     }
 }
 
@@ -363,7 +363,7 @@ TimeSync::Stats TimeSync::getStats() const {
 bool TimeSync::syncNtpTime() {
     // 如果NTP已经初始化，直接返回成功
     if (ntpInitialized) {
-        Serial.printf("[TimeSync] NTP already initialized\n");
+        Serial0.printf("[TimeSync] NTP already initialized\n");
         return true;
     }
     
@@ -406,21 +406,21 @@ bool TimeSync::syncNtpTime() {
 
         time_t now = time(NULL);
         struct tm *timeinfo = localtime(&now);
-        Serial.printf("[TimeSync] localtime: %02d:%02d:%02d\n",
+        Serial0.printf("[TimeSync] localtime: %02d:%02d:%02d\n",
                     timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
 
-        Serial.printf("[TimeSync] NTP synchronized, offset: %lld ms\n", ntpOffsetMs);
-        Serial.printf("[TimeSync] NTP time: %lld ms, System uptime: %lld ms\n", ntpTimeMs, systemUptimeMs);
+        Serial0.printf("[TimeSync] NTP synchronized, offset: %lld ms\n", ntpOffsetMs);
+        Serial0.printf("[TimeSync] NTP time: %lld ms, System uptime: %lld ms\n", ntpTimeMs, systemUptimeMs);
         return true;
     } else {
-        Serial.printf("[TimeSync] ERROR: NTP synchronization timeout\n");
+        Serial0.printf("[TimeSync] ERROR: NTP synchronization timeout\n");
         return false;
     }
 }
 
 void TimeSync::ntpCallback(struct timeval* tv) {
     ntpCallbackCalled = true;
-    Serial.printf("[TimeSync] NTP callback called\n");
+    Serial0.printf("[TimeSync] NTP callback called\n");
     // 注意：这里不能直接设置ntpInitialized，因为这是静态回调函数
     // ntpInitialized会在syncNtpTime中设置
 }
@@ -471,7 +471,7 @@ bool TimeSync::calculateLinearRegression(uint8_t sensorId, float& a, float& b) {
     a = 1;
     b = (sumY - a * sumX) / n;
     
-    Serial.printf("[TimeSync] Sensor %d linear regression: a=%.6f, b=%.2f (valid pairs: %d)\n", 
+    Serial0.printf("[TimeSync] Sensor %d linear regression: a=%.6f, b=%.2f (valid pairs: %d)\n", 
                   sensorId, a, b, validCount);
     
     return true;
@@ -513,7 +513,7 @@ void TimeSync::updateSlidingWindow(uint8_t sensorId, uint32_t sensorTimeMs, int6
     
     // 调试信息：显示前几个时间对
     if (windowCount[sensorIndex] < 5) {
-        Serial.printf("[TimeSync] DEBUG: Sensor %d time pair %d - sensor: %u ms, esp: %lld us\n", 
+        Serial0.printf("[TimeSync] DEBUG: Sensor %d time pair %d - sensor: %u ms, esp: %lld us\n", 
                      sensorId, windowCount[sensorIndex], sensorTimeMs, espTimeUs);
     }
     
