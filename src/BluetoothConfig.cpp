@@ -1,4 +1,5 @@
 #include "BluetoothConfig.h"
+#include "UartReceiver.h"
 
 // 静态常量定义
 const uint8_t BluetoothConfig::BUTTON_PINS[BUTTON_COUNT] = {3, 19, 16};
@@ -17,8 +18,17 @@ const uint8_t BluetoothConfig::BLE_DATA_FOOTER[16] = {
 
 BluetoothConfig::BluetoothConfig() {
     configMode = false;
-    bleBufferPos = 0;
-    memset(bleBuffer, 0, sizeof(bleBuffer));
+    uartReceiver = nullptr;
+    
+    // 初始化环形缓冲区
+    writePos = 0;
+    readPos = 0;
+    memset(uartRxBuffer, 0, sizeof(uartRxBuffer));
+    bufferMutex = xSemaphoreCreateMutex();
+    
+    // 初始化配置行缓冲区
+    configLineBufferPos = 0;
+    memset(configLineBuffer, 0, sizeof(configLineBuffer));
     
     // 初始化按钮状态
     for (uint8_t i = 0; i < BUTTON_COUNT; i++) {
@@ -56,19 +66,32 @@ BluetoothConfig::BluetoothConfig() {
     lastScanDataTime = 0;
     scanResultBuffer = "";
     
-    // 初始化自动连接
-    autoConnectStarted = false;
+    // 初始化自动连接流程
+    autoConnectState = AutoConnectState::IDLE;
     systemStartTime = millis();
     lastAutoScanTime = 0;
     autoScanCount = 0;
     
-    // 初始化连接队列
-    connectQueueSize = 0;
-    memset(connectQueue, -1, sizeof(connectQueue));
+    // 初始化连接流程
+    currentConnectingDevice = -1;
+    connectRetryCount = 0;
+    lastConnectAttemptTime = 0;
+    connectStartTime = 0;
+    
+    // 初始化待连接设备列表
+    pendingConnectCount = 0;
+    memset(pendingConnectDevices, -1, sizeof(pendingConnectDevices));
+    
+    // 初始化帧数检测
+    memset(lastFrameCounts, 0, sizeof(lastFrameCounts));
+    lastConnectionCheckTime = 0;
 }
 
 BluetoothConfig::~BluetoothConfig() {
     // 清理资源
+    if (bufferMutex) {
+        vSemaphoreDelete(bufferMutex);
+    }
 }
 
 bool BluetoothConfig::initialize() {
@@ -78,6 +101,14 @@ bool BluetoothConfig::initialize() {
     initGPIO();
     
     Serial0.printf("[BluetoothConfig] Initialized successfully\n");
+    Serial0.printf("[BluetoothConfig] ========== Configuration Parameters ==========\n");
+    Serial0.printf("[BluetoothConfig] Scan duration: %u sec\n", BT_SCAN_DURATION_SEC);
+    Serial0.printf("[BluetoothConfig] Auto-connect start delay: %u ms\n", AUTO_CONNECT_START_DELAY_MS);
+    Serial0.printf("[BluetoothConfig] Auto-scan interval: %u ms\n", AUTO_SCAN_INTERVAL_MS);
+    Serial0.printf("[BluetoothConfig] Max auto-scan count: %u\n", MAX_AUTO_SCAN_COUNT);
+    Serial0.printf("[BluetoothConfig] Connect retry interval: %u ms\n", CONNECT_RETRY_INTERVAL_MS);
+    Serial0.printf("[BluetoothConfig] Max connect retry: %u\n", MAX_CONNECT_RETRY_COUNT);
+    Serial0.printf("[BluetoothConfig] ============================================\n");
     Serial0.printf("[BluetoothConfig] Send 'BLUE' command to enter/exit config mode\n");
     Serial0.printf("[BluetoothConfig] Buttons: 1=%d, 2=%d, 3=%d\n", BUTTON_PINS[0], BUTTON_PINS[1], BUTTON_PINS[2]);
     Serial0.printf("[BluetoothConfig] LEDs: 1=%d, 2=%d, 3=%d\n", LED_PINS[0], LED_PINS[1], LED_PINS[2]);
@@ -101,8 +132,14 @@ void BluetoothConfig::initGPIO() {
 }
 
 void BluetoothConfig::loop() {
+    // 从环形缓冲区读取并解析配置数据（异步处理）
+    readAndParseConfigData();
+    
     // 处理按钮和LED
     handleButtonsAndLEDs();
+    
+    // 基于帧数检测连接状态（每2秒检查一次）
+    checkConnectionByFrameCount();
     
     // 处理蓝牙业务逻辑（仅在非配置模式下）
     if (!configMode) {
@@ -128,8 +165,8 @@ void BluetoothConfig::setConfigMode(bool enabled) {
         Serial0.printf("[BluetoothConfig] ========================\n\n");
     }
     
-    // 清空缓冲区
-    bleBufferPos = 0;
+    // 清空行缓冲区
+    configLineBufferPos = 0;
 }
 
 void BluetoothConfig::forwardSerialData(const uint8_t* data, size_t length) {
@@ -151,24 +188,68 @@ void BluetoothConfig::forwardSerialData(const String& data) {
     uart_write_bytes(UART_NUM_1, "\r\n", 2);  // 添加换行符
 }
 
-void BluetoothConfig::forwardUartData(const uint8_t* data, size_t length) {
-    if (!data || length == 0) {
-        return;
-    }
-    
-    // 配置模式下，将UART数据（AT响应）转发到Serial0
-    if (configMode) {
-        Serial0.write(data, length);
-    } else {
-        // 非配置模式下，处理蓝牙事件（连接/断开通知、扫描结果等）
-        String dataStr = "";
-        for (size_t i = 0; i < length; i++) {
-            dataStr += (char)data[i];
-        }
-        processBluetoothEvent(dataStr);
+void BluetoothConfig::setUartReceiver(UartReceiver* receiver) {
+    uartReceiver = receiver;
+    if (uartReceiver) {
+        Serial0.printf("[BluetoothConfig] UartReceiver instance registered for frame count detection\n");
     }
 }
 
+// 基于帧数检测连接状态
+void BluetoothConfig::checkConnectionByFrameCount() {
+    if (!uartReceiver) {
+        return; // 没有UartReceiver实例，无法检测
+    }
+    
+    uint32_t now = millis();
+    
+    // 每500ms检查一次
+    if (now - lastConnectionCheckTime < CONNECTION_CHECK_INTERVAL_MS) {
+        return;
+    }
+    
+    lastConnectionCheckTime = now;
+    
+    // 获取当前帧数统计
+    UartReceiver::Stats stats = uartReceiver->getStats();
+    
+    // 检查每个设备对应传感器的帧数变化
+    // 设备1 -> 传感器1 (sensorFrameCounts[0])
+    // 设备2 -> 传感器2 (sensorFrameCounts[1])
+    // 设备3 -> 传感器3 (sensorFrameCounts[2])
+    
+    const uint8_t sensorMapping[DEVICE_COUNT] = {0, 1, 2}; // 传感器索引（0-based）
+    
+    for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
+        uint8_t sensorIndex = sensorMapping[i];
+        uint32_t currentFrameCount = stats.sensorFrameCounts[sensorIndex];
+        uint32_t lastFrameCount = lastFrameCounts[i];
+        
+        // 计算帧数增量
+        uint32_t frameIncrease = currentFrameCount - lastFrameCount;
+        
+        // 更新记录的帧数
+        lastFrameCounts[i] = currentFrameCount;
+        
+        // 根据帧数增量判断连接状态
+        if (frameIncrease >= FRAME_INCREASE_THRESHOLD) {
+            // 帧数在增加，说明设备已连接
+            if (devices[i].state != DeviceConnectionState::CONNECTED) {
+                Serial0.printf("[BluetoothConfig] Device %d detected CONNECTED by frame count (sensor %d: +%u frames in 500ms)\n", 
+                              i + 1, sensorIndex + 1, frameIncrease);
+                updateDeviceState(i, DeviceConnectionState::CONNECTED);
+            }
+        } else {
+            // 帧数没有增加，说明设备断开或未连接
+            if (devices[i].state == DeviceConnectionState::CONNECTED) {
+                Serial0.printf("[BluetoothConfig] Device %d detected DISCONNECTED by frame count (sensor %d: +%u frames in 500ms)\n", 
+                              i + 1, sensorIndex + 1, frameIncrease);
+                updateDeviceState(i, DeviceConnectionState::DISCONNECTED);
+                devices[i].scanIndex = -1;  // 清除扫描索引
+            }
+        }
+    }
+}
 
 void BluetoothConfig::handleButtonsAndLEDs() {
     // 更新所有按钮状态
@@ -320,55 +401,19 @@ bool BluetoothConfig::testReadButton(uint8_t index) {
 void BluetoothConfig::handleBluetoothBusiness() {
     uint32_t now = millis();
     
-    // 1. 自动连接逻辑：启动10秒后开始，每隔3秒扫描一次，最多5次
-    if (!autoConnectStarted && (now - systemStartTime >= AUTO_CONNECT_START_DELAY_MS)) {
-        autoConnectStarted = true;
-        autoScanCount = 0;
-        lastAutoScanTime = now;
-        Serial0.printf("[BluetoothConfig] Auto connect started after 10 seconds\n");
-        Serial0.printf("[BluetoothConfig] Will scan every 3 seconds, max 5 times\n");
-        startScan();
-        autoScanCount++;
-    }
-    
-    // 如果已开始自动连接流程，检查是否需要继续扫描
-    if (autoConnectStarted && !isScanning && autoScanCount < MAX_AUTO_SCAN_COUNT) {
-        // 检查所有设备是否都已连接
-        bool allConnected = true;
-        for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
-            if (devices[i].state != DeviceConnectionState::CONNECTED) {
-                allConnected = false;
-                break;
-            }
-        }
-        
-        // 如果还有设备未连接，且距离上次扫描超过3秒，则继续扫描
-        if (!allConnected && (now - lastAutoScanTime >= AUTO_SCAN_INTERVAL_MS)) {
-            lastAutoScanTime = now;
-            Serial0.printf("[BluetoothConfig] Auto scan #%d\n", autoScanCount + 1);
-            startScan();
-            autoScanCount++;
-        }
-        
-        // 如果已达到最大扫描次数
-        if (autoScanCount >= MAX_AUTO_SCAN_COUNT) {
-            Serial0.printf("[BluetoothConfig] Auto scan completed (%d scans)\n", autoScanCount);
-        }
-    }
-    
-    // 2. 检查扫描是否完成
+    // 1. 检查扫描是否完成
     if (isScanning) {
         bool scanEnded = false;
         
-        // 方式1：如果距离最后接收扫描数据超过500ms，认为扫描完成
+        // 方式1：如果距离最后接收扫描数据超过1秒，认为扫描完成
         if (lastScanDataTime > 0 && (now - lastScanDataTime >= SCAN_DATA_TIMEOUT_MS)) {
             scanEnded = true;
-            Serial0.printf("[BluetoothConfig] Scan completed (no more data)\n");
+            Serial0.printf("[BluetoothConfig] Scan completed (no more data for %u ms)\n", SCAN_DATA_TIMEOUT_MS);
         }
-        // 方式2：绝对超时保护（3秒）
+        // 方式2：绝对超时保护（7秒）
         else if (now - scanStartTime >= SCAN_TIMEOUT_MS) {
             scanEnded = true;
-            Serial0.printf("[BluetoothConfig] Scan timeout\n");
+            Serial0.printf("[BluetoothConfig] Scan timeout (%u ms)\n", SCAN_TIMEOUT_MS);
         }
         
         if (scanEnded) {
@@ -386,43 +431,13 @@ void BluetoothConfig::handleBluetoothBusiness() {
             for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
                 if (devices[i].state == DeviceConnectionState::SCANNING) {
                     updateDeviceState(i, DeviceConnectionState::DISCONNECTED);
-                    Serial0.printf("[BluetoothConfig] Device %d reset to DISCONNECTED\n", i + 1);
                 }
-            }
-            
-            // 扫描完成后，检查是否所有3个设备都被扫描到
-            bool allScanned = true;
-            for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
-                if (devices[i].state != DeviceConnectionState::SCANNED && 
-                    devices[i].state != DeviceConnectionState::CONNECTED) {
-                    allScanned = false;
-                    break;
-                }
-            }
-            
-            // 只有当3个设备都被扫描到时才连接
-            if (allScanned) {
-                Serial0.printf("[BluetoothConfig] All 3 devices scanned, connecting...\n");
-                for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
-                    if (devices[i].state == DeviceConnectionState::SCANNED) {
-                        connectDevice(i);
-                        delay(100);  // 连接命令之间稍作延迟
-                    }
-                }
-            } else {
-                Serial0.printf("[BluetoothConfig] Not all devices scanned, will retry later\n");
-                // 统计扫描到的设备数
-                uint8_t scannedCount = 0;
-                for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
-                    if (devices[i].state == DeviceConnectionState::SCANNED || 
-                        devices[i].state == DeviceConnectionState::CONNECTED) {
-                        scannedCount++;
-                    }
-                }
-                Serial0.printf("[BluetoothConfig] Scanned devices: %d/%d\n", scannedCount, DEVICE_COUNT);
             }
         }
     }
+    
+    // 2. 自动连接流程状态机
+    autoConnectProcess();
     
     // 3. 更新所有设备的LED状态
     for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
@@ -430,25 +445,155 @@ void BluetoothConfig::handleBluetoothBusiness() {
     }
 }
 
-void BluetoothConfig::processBluetoothEvent(const String& data) {
-    // 累积扫描结果
-    if (isScanning) {
-        scanResultBuffer += data;
-        lastScanDataTime = millis();  // 更新最后接收数据时间
+// ====== 环形缓冲区操作函数 ======
+
+// 由UartReceiver快速调用，将数据写入环形缓冲区
+void BluetoothConfig::writeUartDataToBuffer(const uint8_t* data, size_t length) {
+    if (!data || length == 0 || !bufferMutex) {
+        return;
+    }
+    
+    // 获取互斥锁（超时10ms，防止阻塞UartReceiver太久）
+    if (xSemaphoreTake(bufferMutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return; // 无法获取锁，丢弃数据（防止阻塞UartReceiver）
+    }
+    
+    // 写入数据到环形缓冲区
+    for (size_t i = 0; i < length; i++) {
+        uartRxBuffer[writePos] = data[i];
+        writePos = (writePos + 1) % UART_RX_BUFFER_SIZE;
         
-        // 检测扫描结果：包含MAC地址格式的行（包含冒号）和引号
-        // 扫描结果格式："N MAC -RSSI Name\r\n"
-        // 当接收到包含MAC地址的行时，说明扫描结果正在返回
-        if (data.indexOf(':') >= 0 && data.indexOf('"') >= 0) {
-            Serial0.printf("[BluetoothConfig] Scan data received\n");
+        // 检测缓冲区溢出
+        if (writePos == readPos) {
+            // 缓冲区满，移动读指针（丢弃最旧的数据）
+            readPos = (readPos + 1) % UART_RX_BUFFER_SIZE;
         }
     }
     
-    // 检测连接事件："MAC CONNECTD"
-    int connectedPos = data.indexOf("CONNECTD");
+    xSemaphoreGive(bufferMutex);
+}
+
+// 获取环形缓冲区中可读数据量
+size_t BluetoothConfig::getAvailableDataCount() const {
+    if (writePos >= readPos) {
+        return writePos - readPos;
+    } else {
+        return UART_RX_BUFFER_SIZE - readPos + writePos;
+    }
+}
+
+// 从环形缓冲区读取并解析配置数据（在loop中调用，异步处理）
+void BluetoothConfig::readAndParseConfigData() {
+    if (!bufferMutex) {
+        return;
+    }
+    
+    // 获取互斥锁
+    if (xSemaphoreTake(bufferMutex, pdMS_TO_TICKS(1)) != pdTRUE) {
+        return; // 无法获取锁，下次再读
+    }
+    
+    // 从环形缓冲区读取数据
+    while (readPos != writePos) {
+        uint8_t byte = uartRxBuffer[readPos];
+        readPos = (readPos + 1) % UART_RX_BUFFER_SIZE;
+        
+        // 累积到行缓冲区
+        if (configLineBufferPos < CONFIG_LINE_BUFFER_SIZE - 1) {
+            configLineBuffer[configLineBufferPos++] = byte;
+        }
+        
+        // 遇到换行符，处理一行
+        if (byte == '\n') {
+            // 释放锁（处理期间不锁定缓冲区）
+            xSemaphoreGive(bufferMutex);
+            
+            // 终止字符串
+            configLineBuffer[configLineBufferPos] = 0;
+            String line = String((char*)configLineBuffer);
+            
+            // 处理这一行
+            processConfigLine(line);
+            
+            // 清空行缓冲区
+            configLineBufferPos = 0;
+            
+            // 重新获取锁继续读取
+            if (xSemaphoreTake(bufferMutex, pdMS_TO_TICKS(1)) != pdTRUE) {
+                return;
+            }
+        }
+        // 行缓冲区满，强制处理
+        else if (configLineBufferPos >= CONFIG_LINE_BUFFER_SIZE - 1) {
+            xSemaphoreGive(bufferMutex);
+            
+            configLineBuffer[configLineBufferPos] = 0;
+            String line = String((char*)configLineBuffer);
+            processConfigLine(line);
+            configLineBufferPos = 0;
+            
+            if (xSemaphoreTake(bufferMutex, pdMS_TO_TICKS(1)) != pdTRUE) {
+                return;
+            }
+        }
+    }
+    
+    xSemaphoreGive(bufferMutex);
+}
+
+// 处理一行配置数据
+void BluetoothConfig::processConfigLine(const String& line) {
+    String trimmedLine = line;
+    trimmedLine.trim();
+    
+    if (trimmedLine.length() == 0) {
+        return;
+    }
+    
+    // 过滤BLE数据包标识
+    if (trimmedLine.startsWith("BLE DATA") || trimmedLine.startsWith("+RECEIVED")) {
+        return; // 忽略BLE数据包的头部和尾部
+    }
+    
+    // 过滤掉只包含不可打印字符的数据
+    bool hasText = false;
+    for (int i = 0; i < trimmedLine.length(); i++) {
+        char c = trimmedLine.charAt(i);
+        if (c >= 32 && c <= 126) {
+            hasText = true;
+            break;
+        }
+    }
+    if (!hasText) {
+        return;  // 忽略纯二进制数据
+    }
+    
+    // 检测是否是有效的扫描结果行（数字开头，包含MAC地址格式）
+    // 格式：N MAC -RSSI Name
+    bool isValidScanResult = false;
+    if (trimmedLine.length() > 0) {
+        char firstChar = trimmedLine.charAt(0);
+        // 扫描结果以数字开头，且包含MAC地址（包含冒号）
+        if (firstChar >= '0' && firstChar <= '9' && trimmedLine.indexOf(':') > 0) {
+            isValidScanResult = true;
+        }
+    }
+    
+    // 累积扫描结果
+    if (isScanning && isValidScanResult) {
+        scanResultBuffer += trimmedLine + "\n";
+        lastScanDataTime = millis();  // 更新最后接收数据时间
+        Serial0.printf("[BluetoothConfig] Scan data: %s\n", trimmedLine.c_str());
+    }
+    
+    // 注意：连接/断开检测现在主要通过帧数变化来判断（checkConnectionByFrameCount）
+    // 以下代码作为备用，记录蓝牙模块的通知信息
+    
+    // 检测连接事件："MAC CONNECTD"（仅记录日志）
+    int connectedPos = trimmedLine.indexOf("CONNECTD");
     if (connectedPos > 0) {
         // 提取MAC地址
-        String mac = data.substring(0, connectedPos);
+        String mac = trimmedLine.substring(0, connectedPos);
         mac.trim();
         mac.toUpperCase();
         
@@ -457,19 +602,19 @@ void BluetoothConfig::processBluetoothEvent(const String& data) {
             String deviceMac = String(devices[i].macAddress);
             deviceMac.toUpperCase();
             if (mac.indexOf(deviceMac) >= 0 || deviceMac.indexOf(mac) >= 0) {
-                updateDeviceState(i, DeviceConnectionState::CONNECTED);
-                Serial0.printf("[BluetoothConfig] Device %d (%s) CONNECTED\n", 
+                Serial0.printf("[BluetoothConfig] BT module reports: Device %d (%s) CONNECTD\n", 
                               i + 1, devices[i].macAddress);
+                // 不再直接更新状态，让帧数检测来处理
                 break;
             }
         }
     }
     
-    // 检测断开事件："MAC DISCONNECTD"
-    int disconnectedPos = data.indexOf("DISCONNECTD");
+    // 检测断开事件："MAC DISCONNECTD"（仅记录日志）
+    int disconnectedPos = trimmedLine.indexOf("DISCONNECTD");
     if (disconnectedPos > 0) {
         // 提取MAC地址
-        String mac = data.substring(0, disconnectedPos);
+        String mac = trimmedLine.substring(0, disconnectedPos);
         mac.trim();
         mac.toUpperCase();
         
@@ -478,11 +623,191 @@ void BluetoothConfig::processBluetoothEvent(const String& data) {
             String deviceMac = String(devices[i].macAddress);
             deviceMac.toUpperCase();
             if (mac.indexOf(deviceMac) >= 0 || deviceMac.indexOf(mac) >= 0) {
-                updateDeviceState(i, DeviceConnectionState::DISCONNECTED);
-                Serial0.printf("[BluetoothConfig] Device %d (%s) DISCONNECTED\n", 
+                Serial0.printf("[BluetoothConfig] BT module reports: Device %d (%s) DISCONNECTD\n", 
                               i + 1, devices[i].macAddress);
+                // 不再直接更新状态，让帧数检测来处理
                 break;
             }
+        }
+    }
+    
+    // 检测AT响应
+    if (trimmedLine.startsWith("+OK")) {
+        Serial0.printf("[BluetoothConfig] AT Response: OK\n");
+    }
+}
+
+bool BluetoothConfig::isBleDataPacket(const uint8_t* data, size_t length) {
+    // 检查是否包含BLE数据包的头部和尾部
+    if (length < BLE_PACKET_SIZE) {
+        return false;
+    }
+    
+    // 检查头部
+    bool hasHeader = false;
+    for (size_t i = 0; i <= length - sizeof(BLE_DATA_HEADER); i++) {
+        if (memcmp(&data[i], BLE_DATA_HEADER, sizeof(BLE_DATA_HEADER)) == 0) {
+            hasHeader = true;
+            break;
+        }
+    }
+    
+    // 检查尾部
+    bool hasFooter = false;
+    for (size_t i = 0; i <= length - sizeof(BLE_DATA_FOOTER); i++) {
+        if (memcmp(&data[i], BLE_DATA_FOOTER, sizeof(BLE_DATA_FOOTER)) == 0) {
+            hasFooter = true;
+            break;
+        }
+    }
+    
+    return hasHeader && hasFooter;
+}
+
+// ========== 自动连接流程 ==========
+
+// 自动连接主流程
+void BluetoothConfig::autoConnectProcess() {
+    uint32_t now = millis();
+    
+    switch (autoConnectState) {
+        case AutoConnectState::IDLE:
+            // 等待开机延迟
+            if (now - systemStartTime >= AUTO_CONNECT_START_DELAY_MS) {
+                Serial0.printf("[BluetoothConfig] ========== Auto Connect Started ==========\n");
+                Serial0.printf("[BluetoothConfig] Start delay: %u ms elapsed\n", now - systemStartTime);
+                autoConnectState = AutoConnectState::WAITING;
+                lastAutoScanTime = now;
+                autoScanCount = 0;
+            }
+            break;
+            
+        case AutoConnectState::WAITING:
+            // 等待扫描间隔
+            if (!isScanning && (now - lastAutoScanTime >= AUTO_SCAN_INTERVAL_MS)) {
+                if (autoScanCount < MAX_AUTO_SCAN_COUNT) {
+                    autoScanCount++;
+                    lastAutoScanTime = now;
+                    Serial0.printf("[BluetoothConfig] Auto scan #%d/%d\n", autoScanCount, MAX_AUTO_SCAN_COUNT);
+                    startScan();
+                    autoConnectState = AutoConnectState::SCANNING;
+                } else {
+                    Serial0.printf("[BluetoothConfig] Auto scan limit reached (%d scans)\n", MAX_AUTO_SCAN_COUNT);
+                    autoConnectState = AutoConnectState::COMPLETED;
+                }
+            }
+            break;
+            
+        case AutoConnectState::SCANNING:
+            // 等待扫描完成
+            if (!isScanning) {
+                // 扫描完成，检查是否扫到所有设备
+                if (allTargetDevicesScanned()) {
+                    Serial0.printf("[BluetoothConfig] All target devices scanned! Starting connection...\n");
+                    startConnectingDevices();
+                    autoConnectState = AutoConnectState::CONNECTING;
+                } else {
+                    // 未扫到所有设备，继续等待下次扫描
+                    uint8_t scannedCount = 0;
+                    for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
+                        if (devices[i].scanIndex >= 0) scannedCount++;
+                    }
+                    Serial0.printf("[BluetoothConfig] Scanned %d/%d devices, will retry\n", scannedCount, DEVICE_COUNT);
+                    autoConnectState = AutoConnectState::WAITING;
+                }
+            }
+            break;
+            
+        case AutoConnectState::CONNECTING:
+            // 处理连接流程
+            processConnecting();
+            break;
+            
+        case AutoConnectState::COMPLETED:
+            // 自动连接流程已完成，不再处理
+            break;
+    }
+}
+
+// 检查是否扫到所有目标设备
+bool BluetoothConfig::allTargetDevicesScanned() {
+    for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
+        if (devices[i].scanIndex < 0 && devices[i].state != DeviceConnectionState::CONNECTED) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 开始连接设备流程
+void BluetoothConfig::startConnectingDevices() {
+    // 构建待连接设备列表（未连接的设备）
+    pendingConnectCount = 0;
+    for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
+        if (devices[i].state != DeviceConnectionState::CONNECTED && devices[i].scanIndex >= 0) {
+            pendingConnectDevices[pendingConnectCount++] = i;
+        }
+    }
+    
+    Serial0.printf("[BluetoothConfig] Pending connect devices: %d\n", pendingConnectCount);
+    
+    // 从第一个设备开始连接
+    if (pendingConnectCount > 0) {
+        currentConnectingDevice = 0;  // 索引到pendingConnectDevices数组
+        connectRetryCount = 0;
+        lastConnectAttemptTime = 0;
+        connectStartTime = millis();
+    } else {
+        // 没有需要连接的设备
+        autoConnectState = AutoConnectState::COMPLETED;
+    }
+}
+
+// 处理连接流程
+void BluetoothConfig::processConnecting() {
+    if (currentConnectingDevice < 0 || currentConnectingDevice >= pendingConnectCount) {
+        // 所有设备连接流程完成
+        Serial0.printf("[BluetoothConfig] All devices connection process completed\n");
+        autoConnectState = AutoConnectState::COMPLETED;
+        return;
+    }
+    
+    uint32_t now = millis();
+    int8_t deviceIndex = pendingConnectDevices[currentConnectingDevice];
+    
+    // 检查当前设备是否已连接（通过帧数检测）
+    if (devices[deviceIndex].state == DeviceConnectionState::CONNECTED) {
+        Serial0.printf("[BluetoothConfig] Device %d connected successfully\n", deviceIndex + 1);
+        // 进入下一个设备
+        currentConnectingDevice++;
+        connectRetryCount = 0;
+        lastConnectAttemptTime = 0;
+        connectStartTime = millis();
+        return;
+    }
+    
+    // 检查连接超时（每个设备最多等待指定时间）
+    if (now - connectStartTime > CONNECT_WAIT_TIMEOUT_MS) {
+        if (connectRetryCount >= MAX_CONNECT_RETRY_COUNT - 1) {
+            Serial0.printf("[BluetoothConfig] Device %d connection failed after %d attempts\n", 
+                          deviceIndex + 1, MAX_CONNECT_RETRY_COUNT);
+            // 放弃当前设备，进入下一个
+            currentConnectingDevice++;
+            connectRetryCount = 0;
+            lastConnectAttemptTime = 0;
+            connectStartTime = millis();
+            return;
+        }
+    }
+    
+    // 检查是否需要发送连接命令
+    if (now - lastConnectAttemptTime >= CONNECT_RETRY_INTERVAL_MS) {
+        if (connectRetryCount < MAX_CONNECT_RETRY_COUNT) {
+            connectRetryCount++;
+            lastConnectAttemptTime = now;
+            Serial0.printf("[BluetoothConfig] Connecting device %d (attempt %d/%d)...\n", 
+                          deviceIndex + 1, connectRetryCount, MAX_CONNECT_RETRY_COUNT);
+            connectDevice(deviceIndex);
         }
     }
 }
@@ -504,7 +829,7 @@ void BluetoothConfig::startScan() {
     }
     
     // 发送扫描命令
-    sendATCommand("AT+SCAN=1,2,1");
+    sendATCommand("AT+SCAN=1,5,1");
     
     isScanning = true;
     scanStartTime = millis();

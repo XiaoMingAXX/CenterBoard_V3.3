@@ -100,6 +100,7 @@ bool TaskManager::initialize() {
     
     if (uartReceiver && bluetoothConfig) {
         uartReceiver->setBluetoothConfig(bluetoothConfig);
+        bluetoothConfig->setUartReceiver(uartReceiver);  // 双向关联，用于帧数检测
     }
     
     Serial0.printf("[TaskManager] All modules initialized successfully\n");
@@ -257,7 +258,7 @@ bool TaskManager::createNetworkTask() {
         this,
         NETWORK_TASK_PRIORITY,
         &networkTaskHandle,
-        0  // Core 1
+        1  // Core 
     );
     
     if (result != pdPASS) {
@@ -297,7 +298,7 @@ bool TaskManager::createMonitorTask() {
         this,
         MONITOR_TASK_PRIORITY,
         &monitorTaskHandle,
-        0  // Core 1
+        1  // Core 1
     );
     
     if (result != pdPASS) {

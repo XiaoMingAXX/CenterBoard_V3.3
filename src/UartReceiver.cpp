@@ -5,16 +5,6 @@
 #include "TimeSync.h"
 #include "BluetoothConfig.h"
 
-// 定义蓝牙数据包特征
-const uint8_t UartReceiver::BLE_DATA_HEADER[10] = {
-    0x42, 0x4C, 0x45, 0x20, 0x44, 0x41, 0x54, 0x41, 0x0D, 0x0A  // BLE DATA\r\n
-};
-
-const uint8_t UartReceiver::BLE_DATA_FOOTER[16] = {
-    0x2B, 0x52, 0x45, 0x43, 0x45, 0x49, 0x56, 0x45, 
-    0x44, 0x3A, 0x31, 0x2C, 0x34, 0x33, 0x0D, 0x0A  // +RECEIVED:1,43\r\n
-};
-
 UartReceiver::UartReceiver() {
     sensorData = nullptr;
     timeSync = nullptr;
@@ -31,9 +21,6 @@ UartReceiver::UartReceiver() {
     
     // 初始化DMA缓冲区
     memset(dmaBuffer, 0, DMA_BUFFER_SIZE);
-    
-    // 初始化蓝牙数据包解析器
-    resetBleParser();
     
     memset(&stats, 0, sizeof(stats));
     
@@ -108,9 +95,6 @@ bool UartReceiver::start() {
 }
 
 void UartReceiver::stop() {
-    // 刷新配置缓冲区
-    flushConfigBuffer();
-    
     // 停止UART接收
     uart_driver_delete(UART_NUM_1);
     Serial0.printf("[UartReceiver] Stopped UART reception\n");
@@ -321,16 +305,14 @@ void UartReceiver::processDmaData() {
     // uart_driver_install已经处理了底层的中断和DMA
     int len = uart_read_bytes(UART_NUM_1, dmaBuffer, DMA_BUFFER_SIZE, 0);
     if (len > 0) {
-        // 使用状态机逐字节处理，准确识别蓝牙数据包和配置数据
-        for (int i = 0; i < len; i++) {
-            processBleStateMachine(dmaBuffer[i]);
+        // 1. 快速将原始数据复制到BluetoothConfig的环形缓冲区（使用memcpy，不阻塞）
+        //    BluetoothConfig在另一个核心异步处理配置信息
+        if (bluetoothConfig) {
+            bluetoothConfig->writeUartDataToBuffer(dmaBuffer, len);
         }
         
-        // 如果配置缓冲区积累了较多数据且处于IDLE状态，刷新缓冲区
-        // 避免配置数据长时间滞留在缓冲区中
-        if (bleParser.state == BlePacketState::IDLE && bleParser.configBufferPos > 0) {
-            flushConfigBuffer();
-        }
+        // 2. 快速处理传感器数据帧（0xAA...0x55）
+        handleUartData(dmaBuffer, len);
     }
 }
 
@@ -341,132 +323,5 @@ void UartReceiver::setBluetoothConfig(BluetoothConfig* btConfig) {
     }
 }
 
-void UartReceiver::resetBleParser() {
-    bleParser.state = BlePacketState::IDLE;
-    bleParser.headerMatchCount = 0;
-    bleParser.dataCount = 0;
-    bleParser.footerMatchCount = 0;
-    bleParser.configBufferPos = 0;
-    memset(bleParser.dataBuffer, 0, sizeof(bleParser.dataBuffer));
-    memset(bleParser.configBuffer, 0, sizeof(bleParser.configBuffer));
-}
-
-void UartReceiver::processBleStateMachine(uint8_t byte) {
-    switch (bleParser.state) {
-        case BlePacketState::IDLE:
-            // 寻找BLE_DATA_HEADER的第一个字节
-            if (byte == BLE_DATA_HEADER[0]) {
-                bleParser.state = BlePacketState::IN_HEADER;
-                bleParser.headerMatchCount = 1;
-            } else {
-                // 不是蓝牙包头，作为配置数据缓存
-                if (bleParser.configBufferPos < sizeof(bleParser.configBuffer)) {
-                    bleParser.configBuffer[bleParser.configBufferPos++] = byte;
-                } else {
-                    // 配置缓冲区满，先刷新
-                    flushConfigBuffer();
-                    bleParser.configBuffer[bleParser.configBufferPos++] = byte;
-                }
-            }
-            break;
-            
-        case BlePacketState::IN_HEADER:
-            // 继续匹配头部
-            if (byte == BLE_DATA_HEADER[bleParser.headerMatchCount]) {
-                bleParser.headerMatchCount++;
-                if (bleParser.headerMatchCount == sizeof(BLE_DATA_HEADER)) {
-                    // 头部匹配完成，开始接收数据
-                    bleParser.state = BlePacketState::IN_DATA;
-                    bleParser.dataCount = 0;
-                    
-                    // 在进入数据接收状态前，先刷新配置缓冲区（如果有的话）
-                    if (bleParser.configBufferPos > 0) {
-                        flushConfigBuffer();
-                    }
-                }
-            } else {
-                // 头部匹配失败，将之前匹配的部分作为配置数据
-                for (uint8_t i = 0; i < bleParser.headerMatchCount; i++) {
-                    if (bleParser.configBufferPos < sizeof(bleParser.configBuffer)) {
-                        bleParser.configBuffer[bleParser.configBufferPos++] = BLE_DATA_HEADER[i];
-                    }
-                }
-                // 重置状态机
-                bleParser.state = BlePacketState::IDLE;
-                bleParser.headerMatchCount = 0;
-                // 重新处理当前字节
-                processBleStateMachine(byte);
-            }
-            break;
-            
-        case BlePacketState::IN_DATA:
-            // 接收43字节数据
-            bleParser.dataBuffer[bleParser.dataCount++] = byte;
-            if (bleParser.dataCount == BLE_DATA_LENGTH) {
-                // 数据接收完成，开始匹配尾部
-                bleParser.state = BlePacketState::IN_FOOTER;
-                bleParser.footerMatchCount = 0;
-            }
-            break;
-            
-        case BlePacketState::IN_FOOTER:
-            // 匹配尾部
-            if (byte == BLE_DATA_FOOTER[bleParser.footerMatchCount]) {
-                bleParser.footerMatchCount++;
-                if (bleParser.footerMatchCount == sizeof(BLE_DATA_FOOTER)) {
-                    // 完整的蓝牙数据包接收完成
-                    bleParser.state = BlePacketState::COMPLETE;
-                    handleCompleteBlePacket();
-                    // 重置状态机
-                    resetBleParser();
-                }
-            } else {
-                // 尾部匹配失败，这不是有效的蓝牙数据包
-                // 将头部+数据+已匹配的尾部作为配置数据
-                for (uint8_t i = 0; i < sizeof(BLE_DATA_HEADER); i++) {
-                    if (bleParser.configBufferPos < sizeof(bleParser.configBuffer)) {
-                        bleParser.configBuffer[bleParser.configBufferPos++] = BLE_DATA_HEADER[i];
-                    }
-                }
-                for (uint8_t i = 0; i < BLE_DATA_LENGTH; i++) {
-                    if (bleParser.configBufferPos < sizeof(bleParser.configBuffer)) {
-                        bleParser.configBuffer[bleParser.configBufferPos++] = bleParser.dataBuffer[i];
-                    }
-                }
-                for (uint8_t i = 0; i < bleParser.footerMatchCount; i++) {
-                    if (bleParser.configBufferPos < sizeof(bleParser.configBuffer)) {
-                        bleParser.configBuffer[bleParser.configBufferPos++] = BLE_DATA_FOOTER[i];
-                    }
-                }
-                
-                // 重置状态机
-                bleParser.state = BlePacketState::IDLE;
-                bleParser.headerMatchCount = 0;
-                bleParser.footerMatchCount = 0;
-                // 重新处理当前字节
-                processBleStateMachine(byte);
-            }
-            break;
-            
-        case BlePacketState::COMPLETE:
-            // 不应该到这里，重置状态机
-            resetBleParser();
-            processBleStateMachine(byte);
-            break;
-    }
-}
-
-void UartReceiver::handleCompleteBlePacket() {
-    // 完整的蓝牙透传数据包，处理43字节的传感器数据
-    handleUartData(bleParser.dataBuffer, BLE_DATA_LENGTH);
-}
-
-void UartReceiver::flushConfigBuffer() {
-    // 将配置缓冲区的数据转发给BluetoothConfig模块
-    if (bleParser.configBufferPos > 0 && bluetoothConfig) {
-        bluetoothConfig->forwardUartData(bleParser.configBuffer, bleParser.configBufferPos);
-    }
-    bleParser.configBufferPos = 0;
-}
 
 
