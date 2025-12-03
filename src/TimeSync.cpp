@@ -18,10 +18,13 @@ TimeSync::TimeSync() {
         paramBSum[i] = 0.0f;
         calcCompleted[i] = false;
         lastCalcTime[i] = 0;
+        sensorCalibrating[i] = false;
+        autoCalibrationRounds[i] = 0;
     }
     
     syncActive = false;
     fittingActive = false;
+    autoCalibrationActive = false;
     
     // 初始化NTP相关
     ntpOffsetMs = 0;
@@ -103,6 +106,7 @@ void TimeSync::startBackgroundFitting() {
         xSemaphoreGive(mutex);
     }
     Serial0.printf("[TimeSync] Started background fitting\n");
+    Serial0.printf("[TimeSync] Now collecting sensor time pairs for calibration...\n");
 }
 
 void TimeSync::stopBackgroundFitting() {
@@ -111,34 +115,109 @@ void TimeSync::stopBackgroundFitting() {
         xSemaphoreGive(mutex);
     }
     Serial0.printf("[TimeSync] Stopped background fitting\n");
+    Serial0.printf("[TimeSync] Stopped collecting sensor time pairs\n");
 }
 
-void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs) {
-    // 首先检查同步是否激活
-    if (!syncActive) {
-        return; // 同步未激活，直接返回
-    }
-
-    // 尝试获取互斥锁
-    if (xSemaphoreTake(mutex, 0) != pdTRUE) {
-        Serial0.printf("[TimeSync] WARNING: Failed to acquire mutex in addTimePair\n");
-        return; // 无法获取锁，直接返回
-    }
-    
-    // 验证传感器ID有效性
+void TimeSync::startSingleSensorCalibration(uint8_t sensorId) {
     if (!isValidSensorId(sensorId)) {
-        Serial0.printf("[TimeSync] WARNING: Invalid sensor ID: %d\n", sensorId);
-        xSemaphoreGive(mutex);
+        Serial0.printf("[TimeSync] ERROR: Invalid sensor ID: %d\n", sensorId);
         return;
     }
     
-    // 验证时间对的有效性
+    uint8_t sensorIndex = sensorId - 1;
+    
+    if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
+        // 清空该传感器的窗口
+        windowIndex[sensorIndex] = 0;
+        windowCount[sensorIndex] = 0;
+        
+        // 重置累加器（用于自动校准模式）
+        paramASum[sensorIndex] = 0.0f;
+        paramBSum[sensorIndex] = 0.0f;
+        autoCalibrationRounds[sensorIndex] = 0;
+        
+        // 标记该传感器正在校准
+        sensorCalibrating[sensorIndex] = true;
+        
+        xSemaphoreGive(mutex);
+    }
+    
+    Serial0.printf("[TimeSync] Started single sensor calibration for sensor %d\n", sensorId);
+}
+
+void TimeSync::stopSingleSensorCalibration(uint8_t sensorId) {
+    if (!isValidSensorId(sensorId)) {
+        return;
+    }
+    
+    uint8_t sensorIndex = sensorId - 1;
+    
+    if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
+        sensorCalibrating[sensorIndex] = false;
+        xSemaphoreGive(mutex);
+    }
+    
+    Serial0.printf("[TimeSync] Stopped single sensor calibration for sensor %d\n", sensorId);
+}
+
+void TimeSync::startAutoCalibration() {
+    if (xSemaphoreTake(mutex, portMAX_DELAY) == pdTRUE) {
+        // 设置自动校准模式
+        autoCalibrationActive = true;
+        
+        // 为所有传感器清空窗口和重置状态
+        for (int i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            windowIndex[i] = 0;
+            windowCount[i] = 0;
+            paramASum[i] = 0.0f;
+            paramBSum[i] = 0.0f;
+            autoCalibrationRounds[i] = 0;
+            sensorCalibrating[i] = true;  // 所有传感器都开始校准
+        }
+        
+        xSemaphoreGive(mutex);
+    }
+    
+    Serial0.printf("[TimeSync] ========================================\n");
+    Serial0.printf("[TimeSync] Started auto-calibration (3 rounds per sensor)\n");
+    Serial0.printf("[TimeSync] ========================================\n");
+}
+
+bool TimeSync::isSensorCalibrating(uint8_t sensorId) const {
+    if (!isValidSensorId(sensorId) || xSemaphoreTake(mutex, 0) != pdTRUE) {
+        return false;
+    }
+    
+    uint8_t sensorIndex = sensorId - 1;
+    bool calibrating = sensorCalibrating[sensorIndex];
+    xSemaphoreGive(mutex);
+    return calibrating;
+}
+
+void TimeSync::addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs) {
+    // 验证传感器ID有效性
+    if (!isValidSensorId(sensorId)) {
+        return;
+    }
+    
+    uint8_t sensorIndex = sensorId - 1;
+    
+    // 检查是否需要收集该传感器的时间对
+    // 1. 全局校准模式（fittingActive=true）
+    // 2. 单个传感器校准模式（sensorCalibrating[sensorIndex]=true）
+    if (!fittingActive && !sensorCalibrating[sensorIndex]) {
+        return; // 该传感器未在校准中，直接返回
+    }
+
+    // 尝试获取互斥锁（快速获取，失败直接返回）
+    if (xSemaphoreTake(mutex, 0) != pdTRUE) {
+        return; // 无法获取锁，直接返回（避免阻塞数据接收）
+    }
+    
+    // 验证时间对的有效性并快速添加到窗口
     if (isValidTimePair(sensorId, sensorTimeMs, espTimeUs)) {
         updateSlidingWindow(sensorId, sensorTimeMs, espTimeUs);
-        // 注意：不在这里进行拟合计算，避免影响数据接收速度
-    } else {
-        Serial0.printf("[TimeSync] WARNING: Invalid time pair: sensorId=%d, sensorTime=%u, espTime=%lld\n", 
-                     sensorId, sensorTimeMs, espTimeUs);
+        // 注意：不在这里进行计算，在后台任务中处理
     }
     
     xSemaphoreGive(mutex);
@@ -185,52 +264,86 @@ uint32_t TimeSync::formatTimestamp(uint64_t timestampMs) {
 
 
 void TimeSync::performBackgroundFitting() {
-    if (!fittingActive || xSemaphoreTake(mutex, 0) != pdTRUE) {
-        return;
+    // 在后台任务中检查并处理校准计算
+    if (xSemaphoreTake(mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
+        return; // 无法获取锁，下次再处理
     }
     
-    uint32_t currentTime = millis();
-    
-    // 为每个传感器进行独立的拟合计算
+    // 检查每个传感器的窗口状态
     for (uint8_t sensorIndex = 0; sensorIndex < TIME_SYNC_SENSOR_COUNT; sensorIndex++) {
-        uint8_t sensorId = sensorIndex + 1; // 转换为传感器ID (1-4)
+        uint8_t sensorId = sensorIndex + 1;
         
-        // 如果该传感器已完成计算，跳过
-        if (calcCompleted[sensorIndex]) {
-            continue;
+        // 检查该传感器是否正在校准
+        if (!fittingActive && !sensorCalibrating[sensorIndex]) {
+            continue; // 该传感器未在校准中，跳过
         }
         
-        // 检查是否到了计算时间
-        if (currentTime - lastCalcTime[sensorIndex] < Config::TIME_SYNC_CALC_INTERVAL_MS) {
-            continue;
-        }
-        
-        // 当窗口有足够数据时，计算线性回归参数
-        if (windowCount[sensorIndex] >= 10) { // 至少需要10个数据点
+        // 检查窗口是否已满（50个点）
+        if (windowCount[sensorIndex] >= SLIDING_WINDOW_SIZE) {
+            // 窗口已满，进行计算
             float tempA, tempB;
             if (calculateLinearRegression(sensorId, tempA, tempB)) {
-                // 累加参数值
-                paramASum[sensorIndex] += tempA;
-                paramBSum[sensorIndex] += tempB;
-                calcCount[sensorIndex]++;
-                lastCalcTime[sensorIndex] = currentTime;
-                
-                Serial0.printf("[TimeSync] Sensor %d calculation %d/%d: a=%.6f, b=%.2f\n", 
-                             sensorId, calcCount[sensorIndex], Config::TIME_SYNC_CALC_COUNT, tempA, tempB);
-                
-                // 检查是否完成指定次数的计算
-                if (calcCount[sensorIndex] >= Config::TIME_SYNC_CALC_COUNT) {
-                    // 计算平均值
-                    paramA[sensorIndex] = paramASum[sensorIndex] / calcCount[sensorIndex];
-                    paramB[sensorIndex] = paramBSum[sensorIndex] / calcCount[sensorIndex];
+                // 自动校准模式：累加参数并计数
+                if (autoCalibrationActive && sensorCalibrating[sensorIndex]) {
+                    paramASum[sensorIndex] += tempA;
+                    paramBSum[sensorIndex] += tempB;
+                    autoCalibrationRounds[sensorIndex]++;
+                    
+                    Serial0.printf("[TimeSync] Sensor %d auto-calibration round %d: a=%.6f, b=%.2f\n", 
+                                 sensorId, autoCalibrationRounds[sensorIndex], tempA, tempB);
+                    
+                    // 检查是否完成3轮
+                    if (autoCalibrationRounds[sensorIndex] >= 3) {
+                        // 计算平均值
+                        paramA[sensorIndex] = paramASum[sensorIndex] / 3.0f;
+                        paramB[sensorIndex] = paramBSum[sensorIndex] / 3.0f;
+                        paramsValid[sensorIndex] = true;
+                        syncReady[sensorIndex] = true;
+                        sensorCalibrating[sensorIndex] = false;
+                        
+                        Serial0.printf("[TimeSync] Sensor %d auto-calibration completed: avg_a=%.6f, avg_b=%.2f\n", 
+                                     sensorId, paramA[sensorIndex], paramB[sensorIndex]);
+                    }
+                }
+                // 单次校准模式：直接使用参数
+                else if (sensorCalibrating[sensorIndex]) {
+                    paramA[sensorIndex] = tempA;
+                    paramB[sensorIndex] = tempB;
                     paramsValid[sensorIndex] = true;
                     syncReady[sensorIndex] = true;
-                    calcCompleted[sensorIndex] = true;
+                    sensorCalibrating[sensorIndex] = false;
                     
-                    Serial0.printf("[TimeSync] Sensor %d completed: avg_a=%.6f, avg_b=%.2f\n", 
+                    Serial0.printf("[TimeSync] Sensor %d single calibration completed: a=%.6f, b=%.2f\n", 
                                  sensorId, paramA[sensorIndex], paramB[sensorIndex]);
                 }
+                
+                // 清空窗口，准备下次校准
+                windowIndex[sensorIndex] = 0;
+                windowCount[sensorIndex] = 0;
             }
+        }
+    }
+    
+    // 检查自动校准是否全部完成
+    if (autoCalibrationActive) {
+        bool allCompleted = true;
+        for (uint8_t i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+            if (autoCalibrationRounds[i] < 3) {
+                allCompleted = false;
+                break;
+            }
+        }
+        
+        if (allCompleted) {
+            // 所有传感器都完成了自动校准
+            autoCalibrationActive = false;
+            Serial0.printf("[TimeSync] ========================================\n");
+            Serial0.printf("[TimeSync] Auto-calibration completed for all sensors!\n");
+            for (uint8_t i = 0; i < TIME_SYNC_SENSOR_COUNT; i++) {
+                Serial0.printf("[TimeSync] Sensor %d: a=%.6f, b=%.2f\n", 
+                             i + 1, paramA[i], paramB[i]);
+            }
+            Serial0.printf("[TimeSync] ========================================\n");
         }
     }
     
@@ -293,6 +406,11 @@ bool TimeSync::isTimeSyncActive() const {
         return active;
     }
     return false;
+}
+
+bool TimeSync::isNtpInitialized() const {
+    // ntpInitialized 不需要mutex保护，因为它只在初始化时设置一次
+    return ntpInitialized;
 }
 
 void TimeSync::reset() {

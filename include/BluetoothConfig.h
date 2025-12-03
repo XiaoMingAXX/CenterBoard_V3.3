@@ -6,6 +6,7 @@
 
 // 前向声明
 class UartReceiver;
+class TimeSync;
 
 // LED状态枚举
 enum class LEDState {
@@ -87,11 +88,20 @@ public:
     // 设置UartReceiver实例（用于获取帧数统计）
     void setUartReceiver(UartReceiver* receiver);
     
+    // 设置TimeSync实例（用于获取校准状态和触发校准）
+    void setTimeSync(TimeSync* timeSync);
+    
     // 测试接口：手动设置LED状态（用于调试）
     void testSetLED(uint8_t index, LEDState state);
     
     // 测试接口：读取按钮状态（用于调试）
     bool testReadButton(uint8_t index);
+    
+    // 检查是否所有设备都已连接
+    bool areAllDevicesConnected() const;
+    
+    // 获取已连接设备的数量
+    uint8_t getConnectedDeviceCount() const;
     
 private:
     // 配置模式标志
@@ -99,6 +109,9 @@ private:
     
     // UartReceiver实例（用于获取帧数统计）
     UartReceiver* uartReceiver;
+    
+    // TimeSync实例（用于获取校准状态和触发校准）
+    TimeSync* timeSync;
     
     // UART原始数据接收环形缓冲区（由UartReceiver使用memcpy快速复制）
     static const size_t UART_RX_BUFFER_SIZE = 4096;

@@ -1,8 +1,8 @@
 #include "Config.h"
 
 // 网络配置
-const char* Config::WIFI_SSID = "xiaoming";
-const char* Config::WIFI_PASSWORD = "LZMSDSG0704";
+const char* Config::WIFI_SSID = "KineTrack";
+const char* Config::WIFI_PASSWORD = "12345678";
 const char* Config::SERVER_URL = "175.178.100.179";
 const uint16_t Config::SERVER_PORT = 8000;
 const char* Config::WEBSOCKET_PATH = "/ws/esp32/";  // 基础路径，device_code会动态添加
@@ -39,7 +39,7 @@ const uint32_t Config::HEALTH_CHECK_INTERVAL = 60000; // 60秒
 
 // 时间同步配置
 const uint32_t Config::TIME_SYNC_INTERVAL_MS = 2000;        // 2秒
-const uint8_t Config::TIME_SYNC_CALC_COUNT = 3;             // 每个传感器计算3次
+const uint8_t Config::TIME_SYNC_CALC_COUNT = 5;             // 每个传感器计算3次
 const uint32_t Config::TIME_SYNC_CALC_INTERVAL_MS = 2000;   // 2秒计算一次
 
 // 设备配置

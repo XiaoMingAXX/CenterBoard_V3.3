@@ -27,11 +27,20 @@ public:
     // 停止时间同步过程
     void stopTimeSync();
     
-    // 开始后台拟合计算
+    // 开始后台拟合计算（所有传感器）
     void startBackgroundFitting();
     
-    // 停止后台拟合计算
+    // 停止后台拟合计算（所有传感器）
     void stopBackgroundFitting();
+    
+    // 开始单个传感器的校准（一轮）
+    void startSingleSensorCalibration(uint8_t sensorId);
+    
+    // 停止单个传感器的校准
+    void stopSingleSensorCalibration(uint8_t sensorId);
+    
+    // 开始自动校准（三个传感器各三轮取平均）
+    void startAutoCalibration();
     
     // 添加传感器时间戳对（S, E）到滑动窗口（快速操作）
     void addTimePair(uint8_t sensorId, uint32_t sensorTimeMs, int64_t espTimeUs);
@@ -59,6 +68,12 @@ public:
     
     // 检查时间同步是否激活
     bool isTimeSyncActive() const;
+    
+    // 检查NTP是否已初始化完成
+    bool isNtpInitialized() const;
+    
+    // 检查指定传感器是否正在校准中
+    bool isSensorCalibrating(uint8_t sensorId) const;
     
     // 重置时间同步
     void reset();
@@ -95,6 +110,13 @@ private:
     bool syncActive;
     bool fittingActive;
     bool syncReady[TIME_SYNC_SENSOR_COUNT];
+    
+    // 每个传感器的校准状态
+    bool sensorCalibrating[TIME_SYNC_SENSOR_COUNT];  // 传感器是否正在校准中
+    
+    // 自动校准状态
+    bool autoCalibrationActive;  // 是否正在进行自动校准
+    uint8_t autoCalibrationRounds[TIME_SYNC_SENSOR_COUNT];  // 每个传感器已完成的校准轮数
     
     // NTP相关
     int64_t ntpOffsetMs;        // NTP时间差N（毫秒）

@@ -103,6 +103,10 @@ bool TaskManager::initialize() {
         bluetoothConfig->setUartReceiver(uartReceiver);  // 双向关联，用于帧数检测
     }
     
+    if (timeSync && bluetoothConfig) {
+        bluetoothConfig->setTimeSync(timeSync);  // 传递TimeSync实例，用于校准控制
+    }
+    
     Serial0.printf("[TaskManager] All modules initialized successfully\n");
     return true;
 }
@@ -345,28 +349,63 @@ void TaskManager::networkTaskLoop() {
     
     // 用于跟踪WiFi连接状态和延迟启动时间同步
     bool wifiConnected = false;
-    bool timeSyncStarted = false;
+    bool ntpSyncStarted = false;
+    bool sensorTimeSyncStarted = false;
     uint32_t wifiConnectTime = 0;
+    uint32_t lastSensorCheckTime = 0;
     
     while (true) {
         // 检查WiFi连接状态
         if (WiFi.status() == WL_CONNECTED && !wifiConnected) {
             wifiConnected = true;
             wifiConnectTime = millis();
-            Serial0.printf("[Network_Task] WiFi connected, will start time sync in 5 seconds\n");
+            Serial0.printf("[Network_Task] WiFi connected, will start NTP sync in 3 seconds\n");
         }
         
-        // 在WiFi连接后延迟5秒启动时间同步
-        if (wifiConnected && !timeSyncStarted && (millis() - wifiConnectTime >= 5000)) {
-            timeSyncStarted = true;
-            Serial0.printf("[Network_Task] Starting time synchronization after WiFi delay...\n");
+        // 在WiFi连接后延迟3秒启动NTP时间同步
+        if (wifiConnected && !ntpSyncStarted && (millis() - wifiConnectTime >= 3000)) {
+            ntpSyncStarted = true;
+            Serial0.printf("[Network_Task] Starting NTP time synchronization...\n");
             if (timeSync && timeSync->startTimeSync()) {
-                timeSync->startBackgroundFitting();
-                Serial0.printf("[Network_Task] Time synchronization started successfully\n");
+                Serial0.printf("[Network_Task] NTP synchronization started successfully\n");
+                Serial0.printf("[Network_Task] Waiting for all 3 sensors to connect before starting sensor calibration...\n");
             } else {
-                Serial0.printf("[Network_Task] WARNING: Failed to start time synchronization\n");
+                Serial0.printf("[Network_Task] WARNING: Failed to start NTP synchronization\n");
             }
+        }
+        
+        // 检查传感器连接状态（每秒检查一次）
+        if (ntpSyncStarted && !sensorTimeSyncStarted && (millis() - lastSensorCheckTime >= 1000)) {
+            lastSensorCheckTime = millis();
             
+            // 检查NTP是否初始化完成
+            bool ntpReady = (timeSync && timeSync->isNtpInitialized());
+            
+            // 检查是否所有传感器都已连接
+            if (bluetoothConfig && bluetoothConfig->areAllDevicesConnected() && ntpReady) {
+                // 三个传感器都已连接，且NTP已完成，开始自动校准（每个传感器3轮取平均）
+                sensorTimeSyncStarted = true;
+                Serial0.printf("[Network_Task] ========================================\n");
+                Serial0.printf("[Network_Task] All 3 sensors connected and NTP ready!\n");
+                Serial0.printf("[Network_Task] Starting auto-calibration (3 rounds per sensor)...\n");
+                Serial0.printf("[Network_Task] ========================================\n");
+                if (timeSync) {
+                    timeSync->startAutoCalibration();
+                    Serial0.printf("[Network_Task] Auto-calibration started successfully\n");
+                }
+            } else if (bluetoothConfig) {
+                uint8_t connectedCount = bluetoothConfig->getConnectedDeviceCount();
+                // 只在有传感器连接但不满足启动条件时提示
+                if (connectedCount > 0 && connectedCount < 3) {
+                    // 显示等待信息（但不要太频繁）
+                    static uint32_t lastInfoTime = 0;
+                    if (millis() - lastInfoTime >= 5000) { // 每5秒提示一次
+                        Serial0.printf("[Network_Task] Status: %d/3 sensors connected, NTP %s, waiting...\n", 
+                                      connectedCount, ntpReady ? "ready" : "initializing");
+                        lastInfoTime = millis();
+                    }
+                }
+            }
         }
         
         // 网络任务处理数据发送和服务器通信
@@ -412,9 +451,9 @@ void TaskManager::cliTaskLoop() {
         // 但在蓝牙配置模式下不显示提示符
         if (!promptShown && millis() - lastPromptTime > 5000) {
             if (!bluetoothConfig || !bluetoothConfig->isConfigMode()) {
-                Serial0.printf("\nESP32-S3> ");
-                lastPromptTime = millis();
-                promptShown = true;
+            Serial0.printf("\nESP32-S3> ");
+            lastPromptTime = millis();
+            promptShown = true;
             }
         }
         
@@ -430,15 +469,15 @@ void TaskManager::cliTaskLoop() {
             
             // 使用CommandHandler的processChar方法处理字符
             // 它会自动处理正常命令和蓝牙配置模式
-            if (commandHandler) {
+                    if (commandHandler) {
                 commandHandler->processChar(c);
                 
                 // 如果完成了一个命令（换行），显示提示符
                 if ((c == '\n' || c == '\r') && (!bluetoothConfig || !bluetoothConfig->isConfigMode())) {
                     Serial0.printf("ESP32-S3> ");
                 }
-            } else {
-                Serial0.printf("[CLI_Task] ERROR: commandHandler is null!\n");
+                    } else {
+                        Serial0.printf("[CLI_Task] ERROR: commandHandler is null!\n");
             }
         }
         
@@ -493,21 +532,15 @@ void TaskManager::timeSyncTask(void* parameter) {
 void TaskManager::timeSyncTaskLoop() {
     Serial0.printf("[TimeSync_Task] Started on Core %d\n", xPortGetCoreID());
     
-    uint32_t lastFittingTime = 0;
-    const uint32_t FITTING_INTERVAL = Config::TIME_SYNC_CALC_INTERVAL_MS; // 使用配置的计算间隔
-    
     while (true) {
-        uint32_t now = millis();
-        
-        // 定期进行后台拟合计算
-        if (now - lastFittingTime >= FITTING_INTERVAL) {
-            if (timeSync) {
-                timeSync->performBackgroundFitting();
-            }
-            lastFittingTime = now;
+        // 频繁调用后台拟合计算，以便及时处理窗口满的情况
+        // performBackgroundFitting内部会检查是否需要计算
+        if (timeSync) {
+            timeSync->performBackgroundFitting();
         }
         
-        vTaskDelay(pdMS_TO_TICKS(1000)); // 1秒延迟
+        // 较短的延迟，确保及时处理（100ms）
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 

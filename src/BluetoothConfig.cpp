@@ -1,5 +1,6 @@
 #include "BluetoothConfig.h"
 #include "UartReceiver.h"
+#include "TimeSync.h"
 
 // 静态常量定义
 const uint8_t BluetoothConfig::BUTTON_PINS[BUTTON_COUNT] = {3, 19, 16};
@@ -19,6 +20,7 @@ const uint8_t BluetoothConfig::BLE_DATA_FOOTER[16] = {
 BluetoothConfig::BluetoothConfig() {
     configMode = false;
     uartReceiver = nullptr;
+    timeSync = nullptr;
     
     // 初始化环形缓冲区
     writePos = 0;
@@ -195,6 +197,13 @@ void BluetoothConfig::setUartReceiver(UartReceiver* receiver) {
     }
 }
 
+void BluetoothConfig::setTimeSync(TimeSync* ts) {
+    timeSync = ts;
+    if (timeSync) {
+        Serial0.printf("[BluetoothConfig] TimeSync instance registered for calibration control\n");
+    }
+}
+        
 // 基于帧数检测连接状态
 void BluetoothConfig::checkConnectionByFrameCount() {
     if (!uartReceiver) {
@@ -206,7 +215,7 @@ void BluetoothConfig::checkConnectionByFrameCount() {
     // 每500ms检查一次
     if (now - lastConnectionCheckTime < CONNECTION_CHECK_INTERVAL_MS) {
         return;
-    }
+        }
     
     lastConnectionCheckTime = now;
     
@@ -238,7 +247,7 @@ void BluetoothConfig::checkConnectionByFrameCount() {
                 Serial0.printf("[BluetoothConfig] Device %d detected CONNECTED by frame count (sensor %d: +%u frames in 500ms)\n", 
                               i + 1, sensorIndex + 1, frameIncrease);
                 updateDeviceState(i, DeviceConnectionState::CONNECTED);
-            }
+}
         } else {
             // 帧数没有增加，说明设备断开或未连接
             if (devices[i].state == DeviceConnectionState::CONNECTED) {
@@ -302,7 +311,7 @@ void BluetoothConfig::handleButtonPress(uint8_t buttonIndex) {
         handleButtonPressForDevice(buttonIndex);
     } else {
         // 配置模式下，切换LED状态（用于测试）
-        cycleLEDState(buttonIndex);
+    cycleLEDState(buttonIndex);
     }
 }
 
@@ -921,21 +930,40 @@ void BluetoothConfig::updateLEDByDeviceState(uint8_t deviceIndex) {
     if (deviceIndex >= DEVICE_COUNT) return;
     
     LEDState ledState;
+    uint8_t sensorId = deviceIndex + 1;  // 设备索引对应传感器ID（1-3）
     
     switch (devices[deviceIndex].state) {
         case DeviceConnectionState::DISCONNECTED:
+        case DeviceConnectionState::SCANNING:
+        case DeviceConnectionState::CONNECTING:
             ledState = LEDState::OFF;
             break;
-        case DeviceConnectionState::SCANNING:
+            
+        case DeviceConnectionState::SCANNED:
+            // 被扫描到：慢闪
             ledState = LEDState::SLOW_BLINK;
             break;
-        case DeviceConnectionState::SCANNED:
-        case DeviceConnectionState::CONNECTING:
-            ledState = LEDState::FAST_BLINK;
-            break;
+            
         case DeviceConnectionState::CONNECTED:
-            ledState = LEDState::ON;
+            // 已连接，需要检查时间同步状态
+            if (timeSync) {
+                // 检查是否正在校准
+                if (timeSync->isSensorCalibrating(sensorId)) {
+                    // 正在校准：快闪
+                    ledState = LEDState::FAST_BLINK;
+                } else if (timeSync->isTimeSyncReady(sensorId)) {
+                    // 校准完成：常亮
+                    ledState = LEDState::ON;
+                } else {
+                    // 已连接但未校准：快闪（等待校准）
+                    ledState = LEDState::FAST_BLINK;
+                }
+            } else {
+                // 没有TimeSync实例，默认常亮
+                ledState = LEDState::ON;
+            }
             break;
+            
         default:
             ledState = LEDState::OFF;
             break;
@@ -951,6 +979,7 @@ void BluetoothConfig::handleButtonPressForDevice(uint8_t deviceIndex) {
     if (deviceIndex >= DEVICE_COUNT) return;
     
     BluetoothDevice& device = devices[deviceIndex];
+    uint8_t sensorId = deviceIndex + 1;  // 设备索引对应传感器ID（1-3）
     
     switch (device.state) {
         case DeviceConnectionState::DISCONNECTED:
@@ -961,18 +990,33 @@ void BluetoothConfig::handleButtonPressForDevice(uint8_t deviceIndex) {
             break;
             
         case DeviceConnectionState::SCANNED:
-        case DeviceConnectionState::CONNECTING:
             // 已扫描到，按下按钮进行连接
             Serial0.printf("[BluetoothConfig] Button %d: Connecting device %d\n", 
                           deviceIndex + 1, deviceIndex + 1);
             connectDevice(deviceIndex);
             break;
             
-        case DeviceConnectionState::SCANNING:
-        
         case DeviceConnectionState::CONNECTED:
-            // 其他状态不响应
-            Serial0.printf("[BluetoothConfig] Button %d: Device %d in state %d, no action\n", 
+            // 已连接，按下按钮进行单次校准
+            if (timeSync) {
+                // 检查是否正在校准
+                if (timeSync->isSensorCalibrating(sensorId)) {
+                    Serial0.printf("[BluetoothConfig] Button %d: Sensor %d is already calibrating, please wait\n", 
+                                  deviceIndex + 1, sensorId);
+                } else {
+                    Serial0.printf("[BluetoothConfig] Button %d: Starting single calibration for sensor %d\n", 
+                                  deviceIndex + 1, sensorId);
+                    timeSync->startSingleSensorCalibration(sensorId);
+                }
+            } else {
+                Serial0.printf("[BluetoothConfig] Button %d: TimeSync not available\n", deviceIndex + 1);
+            }
+            break;
+            
+        case DeviceConnectionState::SCANNING:
+        case DeviceConnectionState::CONNECTING:
+            // 扫描或连接中，不响应
+            Serial0.printf("[BluetoothConfig] Button %d: Device %d in state %d, please wait\n", 
                           deviceIndex + 1, deviceIndex + 1, (int)device.state);
             break;
     }
@@ -1010,5 +1054,26 @@ bool BluetoothConfig::parseMAC(const String& line, String& mac, int& index) {
     if (mac.indexOf(':') < 0) return false;
     
     return true;
+}
+
+// 检查是否所有设备都已连接
+bool BluetoothConfig::areAllDevicesConnected() const {
+    for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
+        if (devices[i].state != DeviceConnectionState::CONNECTED) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// 获取已连接设备的数量
+uint8_t BluetoothConfig::getConnectedDeviceCount() const {
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < DEVICE_COUNT; i++) {
+        if (devices[i].state == DeviceConnectionState::CONNECTED) {
+            count++;
+        }
+    }
+    return count;
 }
 
